@@ -9,17 +9,19 @@ const NEW_LINE: &str = "\n";
 enum Edit {
     /// Edit line in text file
     Line {
+        /// Line of text
         value: String,
         #[structopt(flatten)]
         ensure: Ensure,
     },
     /// Edit line in text file containing key and value pairs
-    LineKeyValue {
+    LinePair {
+        /// Key and value pair
         pair: String,
         /// Allow multiple keys with different values
         #[structopt(long, short)]
         multikey: bool,
-        /// Pattern matching separator of key and value
+        /// Regular expression pattern matching separator of key and value pairs
         #[structopt(long, short, default_value = r#"([ \t]*=[ \t]*)"#)]
         separator: Regex,
         #[structopt(flatten)]
@@ -29,7 +31,7 @@ enum Edit {
 
 #[derive(Debug, StructOpt)]
 enum Ensure {
-    /// Ensure value is present in file at given placement
+    /// Ensure value is present in file
     Present {
         #[structopt(flatten)]
         placement: Placement,
@@ -40,11 +42,12 @@ enum Ensure {
 
 #[derive(Debug, StructOpt)]
 enum Placement {
-    /// Relative to another entry
+    /// Relative to existing anchor entry
     RelativeTo {
         #[structopt(flatten)]
-        insert: Insert,
-        pattern: Regex,
+        relation: AnchorRelation,
+        /// Regular expression pattern matching anchor value
+        anchor: Regex,
     },
     /// At the top of the file
     AtTop,
@@ -53,22 +56,18 @@ enum Placement {
 }
 
 #[derive(Debug, StructOpt)]
-enum Insert {
-    /// Before matching entry or at the end
+enum AnchorRelation {
+    /// Before matching anchor entry or at the end of the file
     Before,
-    /// After matching entry or at the end
+    /// After matching anchor entry or at the end of the file
     After,
 }
 
-// https://docs.rs/structopt/0.3.2/structopt/index.html#how-to-derivestructopt
-/// Does stuff
+/// Declaratively applies edits to files of various formats
 #[derive(Debug, StructOpt)]
 struct Cli {
     #[structopt(flatten)]
     logging: LoggingOpt,
-
-    #[structopt(flatten)]
-    dry_run: DryRunOpt,
 
     #[structopt(subcommand)]
     edit: Edit,
@@ -138,18 +137,18 @@ impl LinesEditor {
             Placement::AtEnd => {
                 self.lines.push(value.take().unwrap());
             }
-            Placement::RelativeTo { pattern, insert } => {
+            Placement::RelativeTo { anchor, relation } => {
                 self.lines = self.lines.drain(..).into_iter().fold(Vec::new(), |mut out, line| {
-                    let matched = value.is_some() && pattern.is_match(&line);
+                    let matched = value.is_some() && anchor.is_match(&line);
 
-                    match insert {
-                        Insert::Before => {
+                    match relation {
+                        AnchorRelation::Before => {
                             if matched {
                                 out.push(value.take().unwrap());
                             }
                             out.push(line);
                         }
-                        Insert::After => {
+                        AnchorRelation::After => {
                             out.push(line);
                             if matched {
                                 out.push(value.take().unwrap());
@@ -219,7 +218,7 @@ fn main() -> FinalResult {
             debug!("{:#?}", editor);
             Box::new(editor) as Box<dyn Display>
         }
-        Edit::LineKeyValue { pair, multikey, separator, ensure } => {
+        Edit::LinePair { pair, multikey, separator, ensure } => {
             let (key, value) = separator.splitn(&pair, 2).collect_tuple().or_failed_to("split given value as key and value pair with given separator pattern");
 
             let pair_match = Regex::new(&format!("^{}{}{}$", regex::escape(key), separator, regex::escape(value))).expect("failed to construct pair_match regex");
