@@ -34,6 +34,8 @@ enum Ensure {
         #[structopt(flatten)]
         placement: Placement,
     },
+    /// Ensure value is absent from file
+    Absent,
 }
 
 #[derive(Debug, StructOpt)]
@@ -166,6 +168,17 @@ impl LinesEditor {
 
         PresentStatus::InsertedPlacement
     }
+
+    fn absent(&mut self, pattern: &Regex) {
+        self.lines = self.lines.drain(..).into_iter().fold(Vec::new(), |mut out, line| {
+            if pattern.is_match(&line) {
+                // delete matching key
+            } else {
+                out.push(line);
+            }
+            out
+        });
+    }
 }
 
 impl fmt::Display for LinesEditor {
@@ -193,38 +206,49 @@ fn main() -> FinalResult {
 
             match ensure {
                 Ensure::Present { placement } => {
-                    info!("Ensuring line {:?} is preset at {:?}", value, placement);
+                    info!("Ensuring line {:?} is preset", value);
                     let status = editor.present(value, &placement);
                     debug!("Present: {:?}", status);
-                    debug!("{:#?}", editor);
+                }
+                Ensure::Absent => {
+                    info!("Ensuring line {:?} is absent", value);
+                    editor.absent(&Regex::new(&format!("^{}$", &regex::escape(&value))).expect("faile to construct absent regex"));
                 }
             }
 
+            debug!("{:#?}", editor);
             Box::new(editor) as Box<dyn Display>
         }
         Edit::LineKeyValue { pair, multikey, separator, ensure } => {
             let (key, value) = separator.splitn(&pair, 2).collect_tuple().or_failed_to("split given value as key and value pair with given separator pattern");
 
-            let key_separator = if multikey {
+            let pair_match = Regex::new(&format!("^{}{}{}$", regex::escape(key), separator, regex::escape(value))).expect("failed to construct pair_match regex");
+
+            let key_separator_match = if multikey {
                 // Replace only for full key-value match
-                Regex::new(&format!("^{}{}{}$", regex::escape(key), separator, regex::escape(value)))
+                pair_match.clone()
             } else {
-                Regex::new(&format!("^{}{}", regex::escape(key), separator))
-            }.expect("failed to construct key_separator regex");
+                Regex::new(&format!("^{}{}", regex::escape(key), separator)).expect("failed to construct key_separator_match regex")
+            };
 
             let mut editor = LinesEditor::load(input)?;
 
-            match editor.replaced(&key_separator, pair) {
-                ReplaceStatus::NotReplaced(pair) => match ensure {
-                    Ensure::Present { placement } => {
-                        info!("Ensuring key and value pair {:?} is preset at {:?}", pair, placement);
-                        let status = editor.present(pair, &placement);
-                        debug!("Present: {:?}", status);
+            match ensure {
+                Ensure::Present { placement } => {
+                    info!("Ensuring key and value pair {:?} is preset", pair);
+                    match editor.replaced(&key_separator_match, pair) {
+                        ReplaceStatus::NotReplaced(pair) => {
+                            let status = editor.present(pair, &placement);
+                            debug!("Present: {:?}", status);
+                        }
+                        status @ ReplaceStatus::Replaced => debug!("Replace: {:?}", status),
                     }
                 }
-                status @ ReplaceStatus::Replaced => debug!("Replace: {:?}", status),
+                Ensure::Absent => {
+                    info!("Ensuring key and value pair {:?} is absent", pair);
+                    editor.absent(&pair_match);
+                }
             }
-
             debug!("{:#?}", editor);
             Box::new(editor) as Box<dyn Display>
         }
