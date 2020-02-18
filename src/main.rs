@@ -196,7 +196,7 @@ fn main() -> FinalResult {
 
     let input = args.in_place
         .as_ref()
-        .map(|file| File::open(file).map(|f| Box::new(f) as Box<dyn Read>)).transpose()?
+        .map(|file| File::open(file).map(|f| Box::new(f) as Box<dyn Read>)).transpose().problem_while("opening file for reading")?
         .unwrap_or_else(|| Box::new(stdin()) as Box<dyn Read>);
 
     let edited = match args.edit {
@@ -207,11 +207,10 @@ fn main() -> FinalResult {
                 Ensure::Present { placement } => {
                     info!("Ensuring line {:?} is preset", value);
                     let status = editor.present(value, &placement);
-                    debug!("Present: {:?}", status);
-                }
+                    debug!("Present: {:?}", status); }
                 Ensure::Absent => {
                     info!("Ensuring line {:?} is absent", value);
-                    editor.absent(&Regex::new(&format!("^{}$", &regex::escape(&value))).expect("faile to construct absent regex"));
+                    editor.absent(&Regex::new(&format!("^{}$", &regex::escape(&value))).expect("failed to construct absent regex"));
                 }
             }
 
@@ -255,7 +254,7 @@ fn main() -> FinalResult {
 
     let mut output = args.in_place
         .as_ref()
-        .map(|file| File::create(file).map(|f| Box::new(f) as Box<dyn Write>)).transpose()?
+        .map(|file| File::create(file).map(|f| Box::new(f) as Box<dyn Write>)).transpose().problem_while("opening file for writing")?
         .unwrap_or_else(|| Box::new(stdout()) as Box<dyn Write>);
 
     write!(output, "{}", edited)?;
