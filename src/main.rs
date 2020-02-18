@@ -12,7 +12,17 @@ enum Edit {
         value: String,
         #[structopt(flatten)]
         ensure: Ensure,
-    }
+    },
+    /// Edit line in text file containing key and value pairs
+    LineKeyValue {
+        pair: String,
+        // multikey: bool,
+        /// Pattern matching separator of key and value
+        #[structopt(long, short, default_value = "([ \t]*=[ \t]*)")]
+        separator: Regex,
+        #[structopt(flatten)]
+        ensure: Ensure,
+    },
 }
 
 #[derive(Debug, StructOpt)]
@@ -21,15 +31,7 @@ enum Ensure {
     Present {
         #[structopt(flatten)]
         placement: Placement,
-    }
-}
-
-#[derive(Debug, StructOpt)]
-enum Insert {
-    /// Before matching entry or at the end
-    Before,
-    /// After matching entry or at the end
-    After,
+    },
 }
 
 #[derive(Debug, StructOpt)]
@@ -44,6 +46,14 @@ enum Placement {
     AtTop,
     /// At the end of the file
     AtEnd,
+}
+
+#[derive(Debug, StructOpt)]
+enum Insert {
+    /// Before matching entry or at the end
+    Before,
+    /// After matching entry or at the end
+    After,
 }
 
 // https://docs.rs/structopt/0.3.2/structopt/index.html#how-to-derivestructopt
@@ -70,8 +80,15 @@ struct LinesEditor {
 }
 
 #[derive(Debug)]
+enum ReplaceStatus {
+    AlreadyPresent(String),
+    NotReplaced(String),
+    Replaced,
+}
+
+#[derive(Debug)]
 enum PresentStatus {
-    AlreadyPresent,
+    AlreadyPresent(String),
     InsertedPlacement,
     InsertedFallback,
 }
@@ -83,9 +100,31 @@ impl LinesEditor {
         })
     }
 
-    fn present(&mut self, value: String, placement: &Placement) -> PResult<PresentStatus> {
+    fn replaced(&mut self, pattern: &Regex, value: String) -> ReplaceStatus {
         if self.lines.contains(&value) {
-            return Ok(PresentStatus::AlreadyPresent)
+            return ReplaceStatus::AlreadyPresent(value)
+        }
+
+        let mut value = Some(value);
+        self.lines = self.lines.drain(..).into_iter().fold(Vec::new(), |mut out, line| {
+            if value.is_some() && pattern.is_match(&line) {
+                out.push(value.take().unwrap());
+            } else {
+                out.push(line);
+            }
+            out
+        });
+
+        if let Some(value) = value {
+            ReplaceStatus::NotReplaced(value)
+        } else {
+            ReplaceStatus::Replaced
+        }
+    }
+
+    fn present(&mut self, value: String, placement: &Placement) -> PresentStatus {
+        if self.lines.contains(&value) {
+            return PresentStatus::AlreadyPresent(value)
         }
 
         let mut value = Some(value);
@@ -98,7 +137,7 @@ impl LinesEditor {
                 self.lines.push(value.take().unwrap());
             }
             Placement::RelativeTo { pattern, insert } => {
-                let lines = self.lines.drain(..).into_iter().fold(Vec::new(), |mut out, line| {
+                self.lines = self.lines.drain(..).into_iter().fold(Vec::new(), |mut out, line| {
                     let matched = value.is_some() && pattern.is_match(&line);
 
                     match insert {
@@ -117,17 +156,15 @@ impl LinesEditor {
                     }
                     out
                 });
-
-                self.lines = lines;
             }
         }
 
         if let Some(value) = value {
             self.lines.push(value);
-            return Ok(PresentStatus::InsertedFallback)
+            return PresentStatus::InsertedFallback
         }
 
-        Ok(PresentStatus::InsertedPlacement)
+        PresentStatus::InsertedPlacement
     }
 }
 
@@ -150,27 +187,50 @@ fn main() -> FinalResult {
         .map(|file| File::open(file).map(|f| Box::new(f) as Box<dyn Read>)).transpose()?
         .unwrap_or_else(|| Box::new(stdin()) as Box<dyn Read>);
 
-    match args.edit {
+    let edited = match args.edit {
         Edit::Line { value, ensure } => {
             let mut editor = LinesEditor::load(input)?;
 
             match ensure {
                 Ensure::Present { placement } => {
                     info!("Ensuring line {:?} is preset at {:?}", value, placement);
-                    let status = editor.present(value, &placement)?;
+                    let status = editor.present(value, &placement);
                     info!("Result: {:?}", status);
                     debug!("{:#?}", editor);
                 }
             }
 
-            let mut output = args.in_place
-                .as_ref()
-                .map(|file| File::create(file).map(|f| Box::new(f) as Box<dyn Write>)).transpose()?
-                .unwrap_or_else(|| Box::new(stdout()) as Box<dyn Write>);
-
-            write!(output, "{}", editor)?;
+            Box::new(editor) as Box<dyn Display>
         }
-    }
+        Edit::LineKeyValue { pair, separator, ensure } => {
+            let (key, _value) = separator.splitn(&pair, 2).collect_tuple().or_failed_to("split given value as key and value pair with given separator pattern");
+
+            let key_separator = dbg![Regex::new(&regex::escape(key).tap(|v| v.push_str(separator.as_str())))].expect("failed to construct key_separator regex");
+
+            let mut editor = LinesEditor::load(input)?;
+
+            match editor.replaced(&key_separator, pair) {
+                ReplaceStatus::NotReplaced(pair) => match ensure {
+                    Ensure::Present { placement } => {
+                        info!("Ensuring key and value pair {:?} is preset at {:?}", pair, placement);
+                        let status = editor.present(pair, &placement);
+                        info!("Result: {:?}", status);
+                    }
+                }
+                status @ ReplaceStatus::Replaced | status @ ReplaceStatus::AlreadyPresent(_) => info!("Result: {:?}", status),
+            }
+
+            debug!("{:#?}", editor);
+            Box::new(editor) as Box<dyn Display>
+        }
+    };
+
+    let mut output = args.in_place
+        .as_ref()
+        .map(|file| File::create(file).map(|f| Box::new(f) as Box<dyn Write>)).transpose()?
+        .unwrap_or_else(|| Box::new(stdout()) as Box<dyn Write>);
+
+    write!(output, "{}", edited)?;
 
     Ok(())
 }
