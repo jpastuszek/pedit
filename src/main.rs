@@ -99,17 +99,18 @@ impl LinesEditor {
             }
             Placement::RelativeTo { pattern, insert } => {
                 let lines = self.lines.drain(..).into_iter().fold(Vec::new(), |mut out, line| {
+                    let matched = value.is_some() && pattern.is_match(&line);
+
                     match insert {
                         Insert::Before => {
-                            if value.is_some() && pattern.is_match(&line) {
+                            if matched {
                                 out.push(value.take().unwrap());
                             }
                             out.push(line);
                         }
                         Insert::After => {
-                            let push = value.is_some() && pattern.is_match(&line);
                             out.push(line);
-                            if push {
+                            if matched {
                                 out.push(value.take().unwrap());
                             }
                         }
