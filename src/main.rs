@@ -196,16 +196,8 @@ impl fmt::Display for LinesEditor {
     }
 }
 
-fn main() -> FinalResult {
-    let args = Cli::from_args();
-    init_logger(&args.logging, vec![module_path!()]);
-
-    let input = args.in_place
-        .as_ref()
-        .map(|file| File::open(file).map(|f| Box::new(f) as Box<dyn Read>)).transpose().problem_while("opening file for reading")?
-        .unwrap_or_else(|| Box::new(stdin()) as Box<dyn Read>);
-
-    let edited = match args.edit {
+fn edit(edit: Edit, input: impl Read) -> PResult<Box<dyn Display>> {
+    Ok(match edit {
         Edit::Line { value, ignore_whitespace, ensure } => {
             let mut editor = LinesEditor::load(input)?;
 
@@ -230,7 +222,7 @@ fn main() -> FinalResult {
             Box::new(editor) as Box<dyn Display>
         }
         Edit::LinePair { pair, multikey, ignore_whitespace, separator, ensure } => {
-            let (key, value) = separator.splitn(&pair, 2).collect_tuple().or_failed_to("split given value as key and value pair with given separator pattern");
+            let (key, value) = separator.splitn(&pair, 2).collect_tuple().ok_or_problem("Failed to split given value as key and value pair with given separator pattern")?;
 
             let pair_pattern = Regex::new(&if ignore_whitespace {
                 format!(r#"^\s*{}{}{}\s*$"#, regex::escape(key), separator, regex::escape(value))
@@ -270,7 +262,19 @@ fn main() -> FinalResult {
             debug!("{:#?}", editor);
             Box::new(editor) as Box<dyn Display>
         }
-    };
+    })
+}
+
+fn main() -> FinalResult {
+    let args = Cli::from_args();
+    init_logger(&args.logging, vec![module_path!()]);
+
+    let input = args.in_place
+        .as_ref()
+        .map(|file| File::open(file).map(|f| Box::new(f) as Box<dyn Read>)).transpose().problem_while("opening file for reading")?
+        .unwrap_or_else(|| Box::new(stdin()) as Box<dyn Read>);
+
+    let edited = edit(args.edit, input)?;
 
     let mut output = args.in_place
         .as_ref()
