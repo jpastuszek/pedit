@@ -2,6 +2,7 @@ use cotton::prelude::*;
 use cotton::prelude::result::Result as PResult;
 
 use regex::Regex;
+use diff::Result::*;
 
 const NEW_LINE: &str = "\n";
 
@@ -79,6 +80,10 @@ struct Cli {
     #[structopt(long, short)]
     check: bool,
 
+    /// Print difference from before and after edit
+    #[structopt(long, short)]
+    diff: bool,
+
     #[structopt(subcommand)]
     edit: Edit,
 
@@ -94,7 +99,8 @@ struct LinesEditor {
 
 #[derive(Debug)]
 enum ReplaceStatus {
-    NotReplaced(String),
+    AlreadyPresent,
+    KeyNotFound(String),
     Replaced,
 }
 
@@ -105,6 +111,12 @@ enum PresentStatus {
     InsertedFallback,
 }
 
+#[derive(Debug)]
+enum AbsentStatus {
+    AlreadyAbsent,
+    Removed,
+}
+
 impl LinesEditor {
     fn load<R: Read>(data: R) -> PResult<LinesEditor> {
         Ok(LinesEditor {
@@ -112,12 +124,19 @@ impl LinesEditor {
         })
     }
 
-    fn replaced(&mut self, pattern: &Regex, value: String) -> ReplaceStatus {
+    fn replaced(&mut self, pair_pattern: &Regex, key_pattern: &Regex, value: String) -> ReplaceStatus {
         let mut value = Some(value);
+        let mut replaced = false;
+
         self.lines = self.lines.drain(..).into_iter().fold(Vec::new(), |mut out, line| {
-            if pattern.is_match(&line) {
+            if key_pattern.is_match(&line) {
                 if let Some(value) = value.take() {
-                    out.push(value);
+                    if pair_pattern.is_match(&line) {
+                        out.push(line);
+                    } else {
+                        replaced = true;
+                        out.push(value);
+                    }
                 }
                 // else delete matching key
             } else {
@@ -126,10 +145,10 @@ impl LinesEditor {
             out
         });
 
-        if let Some(value) = value {
-            ReplaceStatus::NotReplaced(value)
-        } else {
-            ReplaceStatus::Replaced
+        match (value, replaced) {
+            (Some(value), _) => ReplaceStatus::KeyNotFound(value),
+            (None, true) => ReplaceStatus::Replaced,
+            (None, false) => ReplaceStatus::AlreadyPresent,
         }
     }
 
@@ -178,15 +197,22 @@ impl LinesEditor {
         PresentStatus::InsertedPlacement
     }
 
-    fn absent(&mut self, pattern: &Regex) {
+    fn absent(&mut self, pattern: &Regex) -> AbsentStatus {
+        let mut removed = false;
         self.lines = self.lines.drain(..).into_iter().fold(Vec::new(), |mut out, line| {
             if pattern.is_match(&line) {
-                // delete matching key
+                removed = true
             } else {
                 out.push(line);
             }
             out
         });
+
+        if removed {
+            AbsentStatus::Removed
+        } else {
+            AbsentStatus::AlreadyAbsent
+        }
     }
 }
 
@@ -200,7 +226,58 @@ impl fmt::Display for LinesEditor {
     }
 }
 
-fn edit(edit: Edit, input: impl Read) -> PResult<Box<dyn Display>> {
+#[derive(Debug)]
+enum EditStatus {
+    Replaced(ReplaceStatus),
+    Present(PresentStatus),
+    Absent(AbsentStatus),
+}
+
+impl From<ReplaceStatus> for EditStatus {
+    fn from(s: ReplaceStatus) -> EditStatus {
+        EditStatus::Replaced(s)
+    }
+}
+
+impl From<PresentStatus> for EditStatus {
+    fn from(s: PresentStatus) -> EditStatus {
+        EditStatus::Present(s)
+    }
+}
+
+impl From<AbsentStatus> for EditStatus {
+    fn from(s: AbsentStatus) -> EditStatus {
+        EditStatus::Absent(s)
+    }
+}
+
+impl EditStatus {
+    fn has_changed(&self) -> bool {
+        match self {
+            EditStatus::Replaced(ReplaceStatus::AlreadyPresent)  |
+            EditStatus::Replaced(ReplaceStatus::KeyNotFound(_))  |
+            EditStatus::Present(PresentStatus::AlreadyPresent) |
+            EditStatus::Absent(AbsentStatus::AlreadyAbsent) => false,
+            _ => true,
+        }
+    }
+}
+
+impl fmt::Display for EditStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.has_changed() {
+            write!(f, "no change made")
+        } else {
+            match self {
+                EditStatus::Replaced(_) => write!(f, "value was replaced"),
+                EditStatus::Present(_) => write!(f, "value was inserted"),
+                EditStatus::Absent(_) => write!(f, "value was removed"),
+            }
+        }
+    }
+}
+
+fn edit(edit: Edit, input: impl Read) -> PResult<(Box<dyn Display>, EditStatus)> {
     let mut editor = LinesEditor::load(input).problem_while("reading input text file")?;
 
     Ok(match edit {
@@ -211,19 +288,19 @@ fn edit(edit: Edit, input: impl Read) -> PResult<Box<dyn Display>> {
                 format!(r#"^{}$"#, &regex::escape(&value))
             }).expect("failed to construct absent regex");
 
-            match ensure {
+            let status = match ensure {
                 Ensure::Present { placement } => {
                     info!("Ensuring line {:?} is preset", value);
-                    let status = editor.present(&value_pattern, value, &placement);
-                    debug!("Present: {:?}", status); }
+                    editor.present(&value_pattern, value, &placement).into()
+                }
                 Ensure::Absent => {
                     info!("Ensuring line {:?} is absent", value);
-                    editor.absent(&value_pattern);
+                    editor.absent(&value_pattern).into()
                 }
-            }
+            };
 
-            debug!("{:#?}", editor);
-            Box::new(editor) as Box<dyn Display>
+            debug!("{:?}:\n{:#?}", status, editor);
+            (Box::new(editor) as Box<dyn Display>, status)
         }
         Edit::LinePair { pair, multikey, ignore_whitespace, separator, ensure } => {
             let (key, value) = separator.splitn(&pair, 2).collect_tuple().ok_or_problem("Failed to split given value as key and value pair with given separator pattern")?;
@@ -245,24 +322,25 @@ fn edit(edit: Edit, input: impl Read) -> PResult<Box<dyn Display>> {
                 }).expect("failed to construct replace_pattern regex")
             };
 
-            match ensure {
+            let status = match ensure {
                 Ensure::Present { placement } => {
                     info!("Ensuring key and value pair {:?} is preset", pair);
-                    match editor.replaced(&replace_pattern, pair) {
-                        ReplaceStatus::NotReplaced(pair) => {
-                            let status = editor.present(&pair_pattern, pair, &placement);
-                            debug!("Present: {:?}", status);
+                    match editor.replaced(&pair_pattern, &replace_pattern, pair) {
+                        ReplaceStatus::KeyNotFound(pair) => {
+                            editor.present(&pair_pattern, pair, &placement).into()
                         }
-                        status @ ReplaceStatus::Replaced => debug!("Replace: {:?}", status),
+                        status @ ReplaceStatus::AlreadyPresent |
+                        status @ ReplaceStatus::Replaced => status.into()
                     }
                 }
                 Ensure::Absent => {
                     info!("Ensuring key and value pair {:?} is absent", pair);
-                    editor.absent(&pair_pattern);
+                    editor.absent(&pair_pattern).into()
                 }
-            }
-            debug!("{:#?}", editor);
-            Box::new(editor) as Box<dyn Display>
+            };
+
+            debug!("{:?}:\n{:#?}", status, editor);
+            (Box::new(editor) as Box<dyn Display>, status)
         }
     })
 }
@@ -270,44 +348,49 @@ fn edit(edit: Edit, input: impl Read) -> PResult<Box<dyn Display>> {
 //TODO:
 // * tests
 // * stream input to output with no buffering when possible
+// * replaced -> substituted?
 fn main() -> FinalResult {
     let args = Cli::from_args();
     init_logger(&args.logging, vec![module_path!()]);
+
+    let mut diff_input = None;
 
     let mut input = args.in_place
         .as_ref()
         .map(|file| File::open(file).map(|f| Box::new(f) as Box<dyn Read>)).transpose().problem_while("opening file for reading")?
         .unwrap_or_else(|| Box::new(stdin()) as Box<dyn Read>);
 
-    if args.check {
-        use diff::Result::*;
-
+    if args.diff {
         let mut input_data = String::new();
         input.read_to_string(&mut input_data).problem_while("reading input data")?;
 
-        let output_data = edit(args.edit, std::io::Cursor::new(&input_data))?.to_string();
+        diff_input = Some(input_data);
+        input = Box::new(std::io::Cursor::new(diff_input.as_ref().unwrap()));
+    }
 
-        let diff = diff::lines(&input_data, &output_data);
+    let (edited, status) = edit(args.edit, input)?;
 
-        let changed = diff.iter().any(|r| match r {
-            Both(_, _) => false,
-            _ => true,
-        });
+    info!("Edit result: {}", status);
 
-        if changed {
-            for diff in diff {
+    if let Some(input_data) = diff_input.as_ref() {
+        if status.has_changed() {
+            let output_data = edited.to_string();
+
+            for diff in diff::lines(input_data, &output_data){
                 match diff {
                     Left(line) => eprintln!("- {}", line),
                     Both(line, _) => eprintln!("  {}", line),
                     Right(line) => eprintln!("+ {}", line),
                 }
             }
+        }
+    }
 
+    if args.check {
+        if status.has_changed() {
             Err(Problem::from_error("File would have changed (check)")).fatal_with_status(2)?;
         }
     } else {
-        let edited = edit(args.edit, input)?;
-
         let mut output = args.in_place
             .as_ref()
             .map(|file| File::create(file).map(|f| Box::new(f) as Box<dyn Write>)).transpose().problem_while("opening file for writing")?
