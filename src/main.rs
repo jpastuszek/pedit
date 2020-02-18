@@ -11,6 +11,9 @@ enum Edit {
     Line {
         /// Line of text
         value: String,
+        /// Ignore any white space at the beginning and end of each file line
+        #[structopt(long, short = "w")]
+        ignore_whitespace: bool,
         #[structopt(flatten)]
         ensure: Ensure,
     },
@@ -21,8 +24,11 @@ enum Edit {
         /// Allow multiple keys with different values
         #[structopt(long, short)]
         multikey: bool,
+        /// Ignore any white space at the beginning and end of each file line
+        #[structopt(long, short = "w")]
+        ignore_whitespace: bool,
         /// Regular expression pattern matching separator of key and value pairs
-        #[structopt(long, short, default_value = r#"([ \t]*=[ \t]*)"#)]
+        #[structopt(long, short, default_value = r#"(\s*=\s*)"#)]
         separator: Regex,
         #[structopt(flatten)]
         ensure: Ensure,
@@ -123,8 +129,8 @@ impl LinesEditor {
         }
     }
 
-    fn present(&mut self, value: String, placement: &Placement) -> PresentStatus {
-        if self.lines.contains(&value) {
+    fn present(&mut self, value_pattern: &Regex, value: String, placement: &Placement) -> PresentStatus {
+        if self.lines.iter().any(|line| value_pattern.is_match(line)) {
             return PresentStatus::AlreadyPresent
         }
 
@@ -200,33 +206,47 @@ fn main() -> FinalResult {
         .unwrap_or_else(|| Box::new(stdin()) as Box<dyn Read>);
 
     let edited = match args.edit {
-        Edit::Line { value, ensure } => {
+        Edit::Line { value, ignore_whitespace, ensure } => {
             let mut editor = LinesEditor::load(input)?;
+
+            let value_pattern = Regex::new(&if ignore_whitespace {
+                format!(r#"^\s*{}\s*$"#, &regex::escape(&value))
+            } else {
+                format!(r#"^{}$"#, &regex::escape(&value))
+            }).expect("failed to construct absent regex");
 
             match ensure {
                 Ensure::Present { placement } => {
                     info!("Ensuring line {:?} is preset", value);
-                    let status = editor.present(value, &placement);
+                    let status = editor.present(&value_pattern, value, &placement);
                     debug!("Present: {:?}", status); }
                 Ensure::Absent => {
                     info!("Ensuring line {:?} is absent", value);
-                    editor.absent(&Regex::new(&format!("^{}$", &regex::escape(&value))).expect("failed to construct absent regex"));
+                    editor.absent(&value_pattern);
                 }
             }
 
             debug!("{:#?}", editor);
             Box::new(editor) as Box<dyn Display>
         }
-        Edit::LinePair { pair, multikey, separator, ensure } => {
+        Edit::LinePair { pair, multikey, ignore_whitespace, separator, ensure } => {
             let (key, value) = separator.splitn(&pair, 2).collect_tuple().or_failed_to("split given value as key and value pair with given separator pattern");
 
-            let pair_match = Regex::new(&format!("^{}{}{}$", regex::escape(key), separator, regex::escape(value))).expect("failed to construct pair_match regex");
-
-            let key_separator_match = if multikey {
-                // Replace only for full key-value match
-                pair_match.clone()
+            let pair_pattern = Regex::new(&if ignore_whitespace {
+                format!(r#"^\s*{}{}{}\s*$"#, regex::escape(key), separator, regex::escape(value))
             } else {
-                Regex::new(&format!("^{}{}", regex::escape(key), separator)).expect("failed to construct key_separator_match regex")
+                format!(r#"^{}{}{}$"#, regex::escape(key), separator, regex::escape(value))
+            }).expect("failed to construct pair_pattern regex");
+
+            let replace_pattern = if multikey {
+                // Replace only for full key-value match
+                pair_pattern.clone()
+            } else {
+                Regex::new(&if ignore_whitespace {
+                    format!(r#"^\s*{}{}"#, regex::escape(key), separator)
+                } else {
+                    format!(r#"^{}{}"#, regex::escape(key), separator)
+                }).expect("failed to construct replace_pattern regex")
             };
 
             let mut editor = LinesEditor::load(input)?;
@@ -234,9 +254,9 @@ fn main() -> FinalResult {
             match ensure {
                 Ensure::Present { placement } => {
                     info!("Ensuring key and value pair {:?} is preset", pair);
-                    match editor.replaced(&key_separator_match, pair) {
+                    match editor.replaced(&replace_pattern, pair) {
                         ReplaceStatus::NotReplaced(pair) => {
-                            let status = editor.present(pair, &placement);
+                            let status = editor.present(&pair_pattern, pair, &placement);
                             debug!("Present: {:?}", status);
                         }
                         status @ ReplaceStatus::Replaced => debug!("Replace: {:?}", status),
@@ -244,7 +264,7 @@ fn main() -> FinalResult {
                 }
                 Ensure::Absent => {
                     info!("Ensuring key and value pair {:?} is absent", pair);
-                    editor.absent(&pair_match);
+                    editor.absent(&pair_pattern);
                 }
             }
             debug!("{:#?}", editor);
