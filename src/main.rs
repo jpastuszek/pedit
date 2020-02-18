@@ -16,9 +16,11 @@ enum Edit {
     /// Edit line in text file containing key and value pairs
     LineKeyValue {
         pair: String,
-        // multikey: bool,
+        /// Allow multiple keys with different values
+        #[structopt(long, short)]
+        multikey: bool,
         /// Pattern matching separator of key and value
-        #[structopt(long, short, default_value = "([ \t]*=[ \t]*)")]
+        #[structopt(long, short, default_value = r#"([ \t]*=[ \t]*)"#)]
         separator: Regex,
         #[structopt(flatten)]
         ensure: Ensure,
@@ -81,14 +83,13 @@ struct LinesEditor {
 
 #[derive(Debug)]
 enum ReplaceStatus {
-    AlreadyPresent(String),
     NotReplaced(String),
     Replaced,
 }
 
 #[derive(Debug)]
 enum PresentStatus {
-    AlreadyPresent(String),
+    AlreadyPresent,
     InsertedPlacement,
     InsertedFallback,
 }
@@ -101,14 +102,13 @@ impl LinesEditor {
     }
 
     fn replaced(&mut self, pattern: &Regex, value: String) -> ReplaceStatus {
-        if self.lines.contains(&value) {
-            return ReplaceStatus::AlreadyPresent(value)
-        }
-
         let mut value = Some(value);
         self.lines = self.lines.drain(..).into_iter().fold(Vec::new(), |mut out, line| {
-            if value.is_some() && pattern.is_match(&line) {
-                out.push(value.take().unwrap());
+            if pattern.is_match(&line) {
+                if let Some(value) = value.take() {
+                    out.push(value);
+                }
+                // else delete matching key
             } else {
                 out.push(line);
             }
@@ -124,7 +124,7 @@ impl LinesEditor {
 
     fn present(&mut self, value: String, placement: &Placement) -> PresentStatus {
         if self.lines.contains(&value) {
-            return PresentStatus::AlreadyPresent(value)
+            return PresentStatus::AlreadyPresent
         }
 
         let mut value = Some(value);
@@ -195,17 +195,22 @@ fn main() -> FinalResult {
                 Ensure::Present { placement } => {
                     info!("Ensuring line {:?} is preset at {:?}", value, placement);
                     let status = editor.present(value, &placement);
-                    info!("Result: {:?}", status);
+                    debug!("Present: {:?}", status);
                     debug!("{:#?}", editor);
                 }
             }
 
             Box::new(editor) as Box<dyn Display>
         }
-        Edit::LineKeyValue { pair, separator, ensure } => {
-            let (key, _value) = separator.splitn(&pair, 2).collect_tuple().or_failed_to("split given value as key and value pair with given separator pattern");
+        Edit::LineKeyValue { pair, multikey, separator, ensure } => {
+            let (key, value) = separator.splitn(&pair, 2).collect_tuple().or_failed_to("split given value as key and value pair with given separator pattern");
 
-            let key_separator = dbg![Regex::new(&regex::escape(key).tap(|v| v.push_str(separator.as_str())))].expect("failed to construct key_separator regex");
+            let key_separator = if multikey {
+                // Replace only for full key-value match
+                Regex::new(&format!("^{}{}{}$", regex::escape(key), separator, regex::escape(value)))
+            } else {
+                Regex::new(&format!("^{}{}", regex::escape(key), separator))
+            }.expect("failed to construct key_separator regex");
 
             let mut editor = LinesEditor::load(input)?;
 
@@ -214,10 +219,10 @@ fn main() -> FinalResult {
                     Ensure::Present { placement } => {
                         info!("Ensuring key and value pair {:?} is preset at {:?}", pair, placement);
                         let status = editor.present(pair, &placement);
-                        info!("Result: {:?}", status);
+                        debug!("Present: {:?}", status);
                     }
                 }
-                status @ ReplaceStatus::Replaced | status @ ReplaceStatus::AlreadyPresent(_) => info!("Result: {:?}", status),
+                status @ ReplaceStatus::Replaced => debug!("Replace: {:?}", status),
             }
 
             debug!("{:#?}", editor);
