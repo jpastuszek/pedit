@@ -5,19 +5,18 @@ use regex::Regex;
 
 const NEW_LINE: &str = "\n";
 
-/// Interpret file as give file format
 #[derive(Debug, StructOpt)]
-enum Format {
-    /// Text file
+enum Edit {
+    /// Edit line in text file
     Line {
         value: String,
         #[structopt(flatten)]
-        edit: Edit,
+        ensure: Ensure,
     }
 }
 
 #[derive(Debug, StructOpt)]
-enum Edit {
+enum Ensure {
     /// Ensure value is present in file at given placement
     Present {
         #[structopt(flatten)]
@@ -42,9 +41,9 @@ enum Placement {
         pattern: Regex,
     },
     /// At the top of the file
-    Top,
+    AtTop,
     /// At the end of the file
-    End,
+    AtEnd,
 }
 
 // https://docs.rs/structopt/0.3.2/structopt/index.html#how-to-derivestructopt
@@ -58,7 +57,7 @@ struct Cli {
     dry_run: DryRunOpt,
 
     #[structopt(subcommand)]
-    format: Format,
+    edit: Edit,
 
     /// Edit this file in place.
     #[structopt(long, short)]
@@ -92,10 +91,10 @@ impl LinesEditor {
         let mut value = Some(value);
 
         match placement {
-            Placement::Top => {
+            Placement::AtTop => {
                 self.lines.insert(0, value.take().unwrap());
             }
-            Placement::End => {
+            Placement::AtEnd => {
                 self.lines.push(value.take().unwrap());
             }
             Placement::RelativeTo { pattern, insert } => {
@@ -150,12 +149,12 @@ fn main() -> FinalResult {
         .map(|file| File::open(file).map(|f| Box::new(f) as Box<dyn Read>)).transpose()?
         .unwrap_or_else(|| Box::new(stdin()) as Box<dyn Read>);
 
-    match args.format {
-        Format::Line { value, edit } => {
+    match args.edit {
+        Edit::Line { value, ensure } => {
             let mut editor = LinesEditor::load(input)?;
 
-            match edit {
-                Edit::Present { placement } => {
+            match ensure {
+                Ensure::Present { placement } => {
                     info!("Ensuring line {:?} is preset at {:?}", value, placement);
                     let status = editor.present(value, &placement)?;
                     info!("Result: {:?}", status);
