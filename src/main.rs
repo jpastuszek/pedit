@@ -75,6 +75,10 @@ struct Cli {
     #[structopt(flatten)]
     logging: LoggingOpt,
 
+    /// Check if file would have changed and return with status 2 if it would
+    #[structopt(long, short)]
+    check: bool,
+
     #[structopt(subcommand)]
     edit: Edit,
 
@@ -197,10 +201,10 @@ impl fmt::Display for LinesEditor {
 }
 
 fn edit(edit: Edit, input: impl Read) -> PResult<Box<dyn Display>> {
+    let mut editor = LinesEditor::load(input).problem_while("reading input text file")?;
+
     Ok(match edit {
         Edit::Line { value, ignore_whitespace, ensure } => {
-            let mut editor = LinesEditor::load(input)?;
-
             let value_pattern = Regex::new(&if ignore_whitespace {
                 format!(r#"^\s*{}\s*$"#, &regex::escape(&value))
             } else {
@@ -241,8 +245,6 @@ fn edit(edit: Edit, input: impl Read) -> PResult<Box<dyn Display>> {
                 }).expect("failed to construct replace_pattern regex")
             };
 
-            let mut editor = LinesEditor::load(input)?;
-
             match ensure {
                 Ensure::Present { placement } => {
                     info!("Ensuring key and value pair {:?} is preset", pair);
@@ -265,23 +267,54 @@ fn edit(edit: Edit, input: impl Read) -> PResult<Box<dyn Display>> {
     })
 }
 
+//TODO:
+// * tests
+// * stream input to output with no buffering when possible
 fn main() -> FinalResult {
     let args = Cli::from_args();
     init_logger(&args.logging, vec![module_path!()]);
 
-    let input = args.in_place
+    let mut input = args.in_place
         .as_ref()
         .map(|file| File::open(file).map(|f| Box::new(f) as Box<dyn Read>)).transpose().problem_while("opening file for reading")?
         .unwrap_or_else(|| Box::new(stdin()) as Box<dyn Read>);
 
-    let edited = edit(args.edit, input)?;
+    if args.check {
+        use diff::Result::*;
 
-    let mut output = args.in_place
-        .as_ref()
-        .map(|file| File::create(file).map(|f| Box::new(f) as Box<dyn Write>)).transpose().problem_while("opening file for writing")?
-        .unwrap_or_else(|| Box::new(stdout()) as Box<dyn Write>);
+        let mut input_data = String::new();
+        input.read_to_string(&mut input_data).problem_while("reading input data")?;
 
-    write!(output, "{}", edited)?;
+        let output_data = edit(args.edit, std::io::Cursor::new(&input_data))?.to_string();
+
+        let diff = diff::lines(&input_data, &output_data);
+
+        let changed = diff.iter().any(|r| match r {
+            Both(_, _) => false,
+            _ => true,
+        });
+
+        if changed {
+            for diff in diff {
+                match diff {
+                    Left(line) => eprintln!("- {}", line),
+                    Both(line, _) => eprintln!("  {}", line),
+                    Right(line) => eprintln!("+ {}", line),
+                }
+            }
+
+            Err(Problem::from_error("File would have changed (check)")).fatal_with_status(2)?;
+        }
+    } else {
+        let edited = edit(args.edit, input)?;
+
+        let mut output = args.in_place
+            .as_ref()
+            .map(|file| File::create(file).map(|f| Box::new(f) as Box<dyn Write>)).transpose().problem_while("opening file for writing")?
+            .unwrap_or_else(|| Box::new(stdout()) as Box<dyn Write>);
+
+        write!(output, "{}", edited)?;
+    }
 
     Ok(())
 }
