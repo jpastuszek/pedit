@@ -64,6 +64,13 @@ struct LinesEditor {
     lines: Vec<String>,
 }
 
+#[derive(Debug)]
+enum PresentStatus {
+    AlreadyPresent,
+    InsertedPlacement,
+    InsertedFallback,
+}
+
 impl LinesEditor {
     fn load<R: Read>(data: R) -> PResult<LinesEditor> {
         Ok(LinesEditor {
@@ -71,23 +78,22 @@ impl LinesEditor {
         })
     }
 
-    fn present(&mut self, value: String, placement: &Placement) -> PResult<()> {
-        info!("Present: {:?} {:?}", value, placement);
+    fn present(&mut self, value: String, placement: &Placement) -> PResult<PresentStatus> {
+        if self.lines.contains(&value) {
+            return Ok(PresentStatus::AlreadyPresent)
+        }
 
-
-        //TODO: don't insert twice if already present!
+        let mut value = Some(value);
 
         match placement {
             Placement::Top => {
-                self.lines.insert(0, value);
+                self.lines.insert(0, value.take().unwrap());
             }
             Placement::End => {
-                self.lines.push(value);
+                self.lines.push(value.take().unwrap());
             }
             _ => {
-                let mut value = Some(value);
-
-                let mut lines = self.lines.drain(..).into_iter().fold(Vec::new(), |mut out, line| {
+                let lines = self.lines.drain(..).into_iter().fold(Vec::new(), |mut out, line| {
                     match placement {
                         Placement::Before { pattern } => {
                             if value.is_some() && pattern.is_match(&line) {
@@ -107,17 +113,16 @@ impl LinesEditor {
                     out
                 });
 
-                if let Some(value) = value {
-                    lines.push(value);
-                }
-
                 self.lines = lines;
             }
         }
 
-        dbg![self];
+        if let Some(value) = value {
+            self.lines.push(value);
+            return Ok(PresentStatus::InsertedFallback)
+        }
 
-        Ok(())
+        Ok(PresentStatus::InsertedPlacement)
     }
 }
 
@@ -144,11 +149,11 @@ fn main() -> FinalResult {
         Format::Lines { edit } => {
             let mut editor = LinesEditor::load(input)?;
 
-            dbg![&editor];
-
             match edit {
                 Edit::Present { value, placement } => {
-                    editor.present(value, &placement)?;
+                    info!("Ensuring line {:?} is preset at {:?}", value, placement);
+                    let status = editor.present(value, &placement)?;
+                    info!("Result: {:?}", status);
                 }
             }
 
@@ -157,7 +162,7 @@ fn main() -> FinalResult {
                 .map(|file| File::create(file).map(|f| Box::new(f) as Box<dyn Write>)).transpose()?
                 .unwrap_or_else(|| Box::new(stdout()) as Box<dyn Write>);
 
-            write!(output, "{}", editor);
+            write!(output, "{}", editor)?;
         }
     }
 
