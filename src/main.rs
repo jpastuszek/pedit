@@ -9,7 +9,8 @@ const NEW_LINE: &str = "\n";
 #[derive(Debug, StructOpt)]
 enum Format {
     /// Text file
-    Lines {
+    Line {
+        value: String,
         #[structopt(flatten)]
         edit: Edit,
     }
@@ -19,23 +20,28 @@ enum Format {
 enum Edit {
     /// Ensure value is present in file at given placement
     Present {
-        value: String,
         #[structopt(flatten)]
         placement: Placement,
     }
 }
 
 #[derive(Debug, StructOpt)]
+enum Insert {
+    /// Before matching entry or at the end
+    Before,
+    /// After matching entry or at the end
+    After,
+}
+
+#[derive(Debug, StructOpt)]
 enum Placement {
-    /// Insert value before matching entry or at the end
-    Before {
+    /// Relative to another entry
+    RelativeTo {
+        #[structopt(flatten)]
+        insert: Insert,
         pattern: Regex,
     },
-    /// Insert value after matching entry or at the end
-    After {
-        pattern: Regex,
-    },
-    /// At the top of the fule
+    /// At the top of the file
     Top,
     /// At the end of the file
     End,
@@ -92,23 +98,22 @@ impl LinesEditor {
             Placement::End => {
                 self.lines.push(value.take().unwrap());
             }
-            _ => {
+            Placement::RelativeTo { pattern, insert } => {
                 let lines = self.lines.drain(..).into_iter().fold(Vec::new(), |mut out, line| {
-                    match placement {
-                        Placement::Before { pattern } => {
+                    match insert {
+                        Insert::Before => {
                             if value.is_some() && pattern.is_match(&line) {
                                 out.push(value.take().unwrap());
                             }
                             out.push(line);
                         }
-                        Placement::After { pattern } => {
+                        Insert::After => {
                             let push = value.is_some() && pattern.is_match(&line);
                             out.push(line);
                             if push {
                                 out.push(value.take().unwrap());
                             }
                         }
-                        Placement::Top | Placement::End => panic!("top|end"),
                     }
                     out
                 });
@@ -146,14 +151,15 @@ fn main() -> FinalResult {
         .unwrap_or_else(|| Box::new(stdin()) as Box<dyn Read>);
 
     match args.format {
-        Format::Lines { edit } => {
+        Format::Line { value, edit } => {
             let mut editor = LinesEditor::load(input)?;
 
             match edit {
-                Edit::Present { value, placement } => {
+                Edit::Present { placement } => {
                     info!("Ensuring line {:?} is preset at {:?}", value, placement);
                     let status = editor.present(value, &placement)?;
                     info!("Result: {:?}", status);
+                    debug!("{:#?}", editor);
                 }
             }
 
