@@ -85,6 +85,7 @@ fn edit(input: impl Read, edit: Edit) -> PResult<(Box<dyn Display>, EditStatus)>
 // * top/end -> begginging/end or head/tail?
 // * option to create a file if it does not exists (for present edits)
 // * preserve no line eding on last line
+// * MultipleMatch -> MultipleCandidates
 fn main() -> FinalResult {
     let args = Cli::from_args();
     init_logger(&args.logging, vec![module_path!()]);
@@ -288,6 +289,49 @@ Host *.foo.example.com
     }
 
     #[test]
+    fn test_edit_pair_value() -> FinalResult {
+        let (output, status) = stable_pedit("foo = 1\nbar = 2\nbaz = 3", &[
+              "line-pair",
+              "bar = 4",
+              "present",
+              "at-top",
+        ])?;
+
+        assert!(status.has_changed());
+        assert_eq!(&output, "foo = 1\nbar = 4\nbaz = 3\n");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_edit_pair_multikey_value() -> FinalResult {
+        let (output, status) = stable_pedit("foo = 1\nbar = 2\nbaz = 3", &[
+              "line-pair",
+              "-m",
+              "bar = 4",
+              "present",
+              "at-top",
+        ])?;
+
+        assert!(status.has_changed());
+        assert_eq!(&output, "bar = 4\nfoo = 1\nbar = 2\nbaz = 3\n");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_edit_pair_multi_match() {
+        let err = stable_pedit("foo = 1\nbar = 2\nbar = 3\nbaz = 3", &[
+              "line-pair",
+              "bar = 4",
+              "present",
+              "at-top",
+        ]).unwrap_err();
+
+        assert_eq!(&err.to_string(), "Multiple matches found");
+    }
+
+    #[test]
     fn test_edit_line_pair_relative_to_before_middle() -> FinalResult {
         let (output, status) = stable_pedit("foo = 1\nbar = 2\nbaz = 3", &[
               "line",
@@ -416,6 +460,7 @@ Host *.foo.example.com
               "foo",
               "before",
         ]).unwrap_err();
+
         assert_eq!(&err.to_string(), "Multiple matches found");
     }
 }

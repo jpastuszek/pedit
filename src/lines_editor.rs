@@ -38,14 +38,14 @@ impl LinesEditor {
     }
 
     fn replaced(&mut self, pair_pattern: &Regex, key_pattern: &Regex, value: String) -> Result<ReplaceStatus, LinesEditorError> {
-        if self.lines.iter().any(|line| pair_pattern.is_match(line)) {
-            return Ok(ReplaceStatus::AlreadyPresent)
-        }
-
         let mut iter = self.lines.iter_mut();
         if let Some(line) = (&mut iter).find(|line| key_pattern.is_match(line)) {
             if iter.any(|line| key_pattern.is_match(line)) {
                 return Err(LinesEditorError::MultipleMatch)
+            }
+
+            if pair_pattern.is_match(line) {
+                return Ok(ReplaceStatus::AlreadyPresent)
             }
 
             *line = value;
