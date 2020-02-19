@@ -74,40 +74,27 @@ impl LinesEditor {
             return Ok(PresentStatus::AlreadyPresent)
         }
 
-        let mut value = Some(value);
-
         match placement {
             Placement::AtTop => {
-                self.lines.insert(0, value.take().unwrap());
+                self.lines.insert(0, value);
             }
             Placement::AtEnd => {
-                self.lines.push(value.take().unwrap());
+                self.lines.push(value);
             }
             Placement::RelativeTo { anchor, relation } => {
-                self.lines = self.lines.drain(..).into_iter().fold(Vec::new(), |mut out, line| {
-                    let matched = value.is_some() && anchor.is_match(&line);
+                if let Some(position) = self.lines.iter().position(|line| anchor.is_match(line)) {
+                    if self.lines.split_at(position + 1).1.iter().any(|line| anchor.is_match(line)) {
+                        return Err(LinesEditorError::MultipleMatch)
+                    }
 
                     match relation {
-                        AnchorRelation::Before => {
-                            if matched {
-                                out.push(value.take().unwrap());
-                            }
-                            out.push(line);
-                        }
-                        AnchorRelation::After => {
-                            out.push(line);
-                            if matched {
-                                out.push(value.take().unwrap());
-                            }
-                        }
+                        AnchorRelation::Before => self.lines.insert(position, value),
+                        AnchorRelation::After =>  self.lines.insert(position + 1, value),
                     }
-                    out
-                });
+                } else {
+                    return Err(LinesEditorError::NotApplicable(value))
+                }
             }
-        }
-
-        if let Some(value) = value {
-            return Err(LinesEditorError::NotApplicable(value))
         }
 
         Ok(PresentStatus::InsertedPlacement)

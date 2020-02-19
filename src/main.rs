@@ -84,6 +84,7 @@ fn edit(input: impl Read, edit: Edit) -> PResult<(Box<dyn Display>, EditStatus)>
 // * line-pair -> line-kv?
 // * top/end -> begginging/end or head/tail?
 // * option to create a file if it does not exists (for present edits)
+// * preserve no line eding on last line
 fn main() -> FinalResult {
     let args = Cli::from_args();
     init_logger(&args.logging, vec![module_path!()]);
@@ -282,6 +283,121 @@ Host *.foo.example.com
               r#"IdentityFile ~/.ssh/quix"#,
               "present",
               "at-top",
+        ]).unwrap_err();
+        assert_eq!(&err.to_string(), "Multiple matches found");
+    }
+
+    #[test]
+    fn test_edit_line_relative_to_before_top() -> FinalResult {
+        let (output, status) = stable_pedit("foo\nbar\nbaz", &[
+              "line",
+              "quix",
+              "present",
+              "relative-to",
+              "foo",
+              "before",
+        ])?;
+
+        assert!(status.has_changed());
+        assert_eq!(&output, "quix\nfoo\nbar\nbaz\n");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_edit_line_relative_to_before_middle() -> FinalResult {
+        let (output, status) = stable_pedit("foo\nbar\nbaz", &[
+              "line",
+              "quix",
+              "present",
+              "relative-to",
+              "bar",
+              "before",
+        ])?;
+
+        assert!(status.has_changed());
+        assert_eq!(&output, "foo\nquix\nbar\nbaz\n");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_edit_line_relative_to_before_end() -> FinalResult {
+        let (output, status) = stable_pedit("foo\nbar\nbaz", &[
+              "line",
+              "quix",
+              "present",
+              "relative-to",
+              "baz",
+              "before",
+        ])?;
+
+        assert!(status.has_changed());
+        assert_eq!(&output, "foo\nbar\nquix\nbaz\n");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_edit_line_relative_to_after_top() -> FinalResult {
+        let (output, status) = stable_pedit("foo\nbar\nbaz", &[
+              "line",
+              "quix",
+              "present",
+              "relative-to",
+              "foo",
+              "after",
+        ])?;
+
+        assert!(status.has_changed());
+        assert_eq!(&output, "foo\nquix\nbar\nbaz\n");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_edit_line_relative_to_after_middle() -> FinalResult {
+        let (output, status) = stable_pedit("foo\nbar\nbaz", &[
+              "line",
+              "quix",
+              "present",
+              "relative-to",
+              "bar",
+              "after",
+        ])?;
+
+        assert!(status.has_changed());
+        assert_eq!(&output, "foo\nbar\nquix\nbaz\n");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_edit_line_relative_to_after_end() -> FinalResult {
+        let (output, status) = stable_pedit("foo\nbar\nbaz", &[
+              "line",
+              "quix",
+              "present",
+              "relative-to",
+              "baz",
+              "after",
+        ])?;
+
+        assert!(status.has_changed());
+        assert_eq!(&output, "foo\nbar\nbaz\nquix\n");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_edit_line_relative_to_multiple_match() {
+        let err = stable_pedit("foo\nfoo", &[
+              "line",
+              r#"bar"#,
+              "present",
+              "relative-to",
+              "foo",
+              "before",
         ]).unwrap_err();
         assert_eq!(&err.to_string(), "Multiple matches found");
     }
