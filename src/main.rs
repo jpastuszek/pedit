@@ -288,6 +288,23 @@ Host *.foo.example.com
     }
 
     #[test]
+    fn test_edit_line_pair_relative_to_before_middle() -> FinalResult {
+        let (output, status) = stable_pedit("foo = 1\nbar = 2\nbaz = 3", &[
+              "line",
+              "quix = 4",
+              "present",
+              "relative-to",
+              "bar",
+              "before",
+        ])?;
+
+        assert!(status.has_changed());
+        assert_eq!(&output, "foo = 1\nquix = 4\nbar = 2\nbaz = 3\n");
+
+        Ok(())
+    }
+
+    #[test]
     fn test_edit_line_relative_to_before_top() -> FinalResult {
         let (output, status) = stable_pedit("foo\nbar\nbaz", &[
               "line",

@@ -42,28 +42,15 @@ impl LinesEditor {
             return Ok(ReplaceStatus::AlreadyPresent)
         }
 
-        let mut value = Some(value);
-        let mut multimach = false;
-
-        self.lines = self.lines.drain(..).into_iter().fold(Vec::new(), |mut out, line| {
-            if key_pattern.is_match(&line) {
-                if let Some(value) = value.take() {
-                    out.push(value);
-                } else {
-                    multimach = true
-                }
-            } else {
-                out.push(line);
+        let mut iter = self.lines.iter_mut();
+        if let Some(line) = (&mut iter).find(|line| key_pattern.is_match(line)) {
+            if iter.any(|line| key_pattern.is_match(line)) {
+                return Err(LinesEditorError::MultipleMatch)
             }
-            out
-        });
 
-        if let Some(value) = value {
+            *line = value;
+        } else {
             return Err(LinesEditorError::NotApplicable(value))
-        }
-
-        if multimach {
-            return Err(LinesEditorError::MultipleMatch)
         }
 
         Ok(ReplaceStatus::Replaced)
