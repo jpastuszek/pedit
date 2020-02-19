@@ -82,8 +82,9 @@ impl LinesEditor {
                 self.lines.push(value);
             }
             Placement::RelativeTo { anchor, relation } => {
-                if let Some(position) = self.lines.iter().position(|line| anchor.is_match(line)) {
-                    if self.lines.split_at(position + 1).1.iter().any(|line| anchor.is_match(line)) {
+                let mut iter = self.lines.iter();
+                if let Some(position) = (&mut iter).position(|line| anchor.is_match(line)) {
+                    if iter.any(|line| anchor.is_match(line)) {
                         return Err(LinesEditorError::MultipleMatch)
                     }
 
