@@ -3,6 +3,7 @@ use cotton::prelude::result::Result as PResult;
 
 use regex::Regex;
 use diff::Result::*;
+use std::io::Cursor;
 
 mod editor;
 mod lines_editor;
@@ -54,12 +55,16 @@ struct Cli {
     #[structopt(long, short)]
     diff: bool,
 
-    #[structopt(subcommand)]
-    edit: Edit,
-
     /// Edit this file in place.
     #[structopt(long, short)]
     in_place: Option<PathBuf>,
+
+    /// Create in-place file is it does not exist
+    #[structopt(long, short = "C")]
+    create: bool,
+
+    #[structopt(subcommand)]
+    edit: Edit,
 }
 
 fn edit(input: impl Read, edit: Edit) -> PResult<(Box<dyn Display>, EditStatus)> {
@@ -83,7 +88,6 @@ fn edit(input: impl Read, edit: Edit) -> PResult<(Box<dyn Display>, EditStatus)>
 // * replaced -> substituted?
 // * line-pair -> line-kv?
 // * top/end -> begginging/end or head/tail?
-// * option to create a file if it does not exists (for present edits)
 // * preserve no line eding on last line
 fn main() -> FinalResult {
     let args = Cli::from_args();
@@ -93,7 +97,12 @@ fn main() -> FinalResult {
 
     let mut input = args.in_place
         .as_ref()
-        .map(|file| File::open(file).map(|f| Box::new(f) as Box<dyn Read>)).transpose().problem_while("opening file for reading")?
+        .map(|file| {
+            match (File::open(file).map(|f| Box::new(f) as Box<dyn Read>), args.create) {
+                (Err(_), true) => Ok(Box::new(Cursor::new(String::new())) as Box<dyn Read>),
+                (result, _) => result,
+            }
+        }).transpose().problem_while("opening file for reading")?
         .unwrap_or_else(|| Box::new(stdin()) as Box<dyn Read>);
 
     if args.diff {
@@ -101,7 +110,7 @@ fn main() -> FinalResult {
         input.read_to_string(&mut input_data).problem_while("reading input data")?;
 
         diff_input = Some(input_data);
-        input = Box::new(std::io::Cursor::new(diff_input.as_ref().unwrap()));
+        input = Box::new(Cursor::new(diff_input.as_ref().unwrap()));
     }
 
     let (edited, status) = edit(input, args.edit)?;
@@ -141,7 +150,6 @@ fn main() -> FinalResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
 
     const XML_TEST: &str =
 r#"<LayoutModificationTemplate
