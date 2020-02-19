@@ -88,22 +88,19 @@ impl LinesEditor {
         Ok(PresentStatus::InsertedPlacement)
     }
 
-    fn absent(&mut self, pattern: &Regex) -> AbsentStatus {
-        let mut removed = false;
-        self.lines = self.lines.drain(..).into_iter().fold(Vec::new(), |mut out, line| {
-            if pattern.is_match(&line) {
-                removed = true
-            } else {
-                out.push(line);
+    fn absent(&mut self, pattern: &Regex) -> Result<AbsentStatus, LinesEditorError> {
+        let mut iter = self.lines.iter();
+        if let Some(position) = (&mut iter).position(|line| pattern.is_match(line)) {
+            if iter.any(|line| pattern.is_match(line)) {
+                return Err(LinesEditorError::MultipleMatch)
             }
-            out
-        });
 
-        if removed {
-            AbsentStatus::Removed
+            self.lines.remove(position);
         } else {
-            AbsentStatus::AlreadyAbsent
+            return Ok(AbsentStatus::AlreadyAbsent)
         }
+
+        Ok(AbsentStatus::Removed)
     }
 
     pub fn edit_line(&mut self, value: String, ignore_whitespace: bool, ensure: Ensure) -> Result<EditStatus, LinesEditorError> {
@@ -120,7 +117,7 @@ impl LinesEditor {
             }
             Ensure::Absent => {
                 info!("Ensuring line {:?} is absent", value);
-                self.absent(&value_pattern).into()
+                self.absent(&value_pattern)?.into()
             }
         };
 
@@ -159,7 +156,7 @@ impl LinesEditor {
             }
             Ensure::Absent => {
                 info!("Ensuring key and value pair {:?} is absent", pair);
-                self.absent(&pair_pattern).into()
+                self.absent(&pair_pattern)?.into()
             }
         };
 

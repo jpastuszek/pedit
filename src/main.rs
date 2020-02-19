@@ -451,7 +451,7 @@ Host *.foo.example.com
     }
 
     #[test]
-    fn test_edit_line_relative_to_multiple_match() {
+    fn test_edit_line_relative_to_multi_match() {
         let err = stable_pedit("foo\nfoo", &[
               "line",
               r#"bar"#,
@@ -459,6 +459,84 @@ Host *.foo.example.com
               "relative-to",
               "foo",
               "before",
+        ]).unwrap_err();
+
+        assert_eq!(&err.to_string(), "Multiple matches found");
+    }
+
+    #[test]
+    fn test_edit_line_absent_middle() -> FinalResult {
+        let (output, status) = stable_pedit("foo\nbar\nbaz", &[
+              "line",
+              "bar",
+              "absent",
+        ])?;
+
+        assert!(status.has_changed());
+        assert_eq!(&output, "foo\nbaz\n");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_edit_line_absent_top() -> FinalResult {
+        let (output, status) = stable_pedit("foo\nbar\nbaz", &[
+              "line",
+              "foo",
+              "absent",
+        ])?;
+
+        assert!(status.has_changed());
+        assert_eq!(&output, "bar\nbaz\n");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_edit_line_absent_end() -> FinalResult {
+        let (output, status) = stable_pedit("foo\nbar\nbaz", &[
+              "line",
+              "baz",
+              "absent",
+        ])?;
+
+        assert!(status.has_changed());
+        assert_eq!(&output, "foo\nbar\n");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_edit_line_absent_multi_match() {
+        let err = stable_pedit("foo\nbaz\nbaz", &[
+              "line",
+              "baz",
+              "absent",
+        ]).unwrap_err();
+
+        assert_eq!(&err.to_string(), "Multiple matches found");
+    }
+
+    #[test]
+    fn test_edit_line_pair_absent_middle() -> FinalResult {
+        let (output, status) = stable_pedit("foo = 1\nbar = 2\nbaz = 3", &[
+              "line-pair",
+              "bar = 2",
+              "absent",
+        ])?;
+
+        assert!(status.has_changed());
+        assert_eq!(&output, "foo = 1\nbaz = 3\n");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_edit_line_pair_absent_multi_match() {
+        let err = stable_pedit("foo = 1\nbaz = 2\nbaz = 2", &[
+              "line-pair",
+              "baz = 2",
+              "absent",
         ]).unwrap_err();
 
         assert_eq!(&err.to_string(), "Multiple matches found");
