@@ -62,7 +62,7 @@ struct Cli {
     in_place: Option<PathBuf>,
 }
 
-fn edit(edit: Edit, input: impl Read) -> PResult<(Box<dyn Display>, EditStatus)> {
+fn edit(input: impl Read, edit: Edit) -> PResult<(Box<dyn Display>, EditStatus)> {
     let mut editor = LinesEditor::load(input).problem_while("reading input text file")?;
 
     let status = match edit {
@@ -101,7 +101,7 @@ fn main() -> FinalResult {
         input = Box::new(std::io::Cursor::new(diff_input.as_ref().unwrap()));
     }
 
-    let (edited, status) = edit(args.edit, input)?;
+    let (edited, status) = edit(input, args.edit)?;
 
     info!("Edit result: {}", status);
 
@@ -137,8 +137,79 @@ fn main() -> FinalResult {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    const XML_TEST: &str =
+r#"<LayoutModificationTemplate
+    xmlns="http://schemas.microsoft.com/Start/2014/LayoutModification"
+    xmlns:defaultlayout="http://schemas.microsoft.com/Start/2014/FullDefaultLayout"
+    xmlns:start="http://schemas.microsoft.com/Start/2014/StartLayout"
+    xmlns:taskbar="http://schemas.microsoft.com/Start/2014/TaskbarLayout"
+    Version="1">
+  <CustomTaskbarLayoutCollection PinListPlacement="Replace">
+    <defaultlayout:TaskbarLayout>
+      <taskbar:TaskbarPinList>
+        <taskbar:DesktopApp DesktopApplicationLinkPath="C:\Users\Administrator\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Scoop Apps\Process Explorer.lnk" />
+        <taskbar:DesktopApp DesktopApplicationLinkPath="C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Administrative Tools\IIS Manager.lnk" />
+      </taskbar:TaskbarPinList>
+    </defaultlayout:TaskbarLayout>
+  </CustomTaskbarLayoutCollection>
+</LayoutModificationTemplate>"#;
+
+    fn pedit(input: &str, args: &[&str]) -> PResult<(String, EditStatus)> {
+        let cli = Cli::from_iter_safe(Some("pedit").iter().chain(args.iter())).or_failed_to("bad args");
+        let args = dbg![cli.edit];
+        let (disp, status) = edit(Cursor::new(input), args)?;
+        let out = disp.to_string();
+        dbg![&status];
+        eprintln!("{}", out);
+        Ok((out, status))
+    }
+
+    fn stable_pedit(input: &str, args: &[&str]) -> PResult<(String, EditStatus)> {
+        let (output, status) = pedit(input, args)?;
+
+        // Second run on result should have not changes
+        let (output2, status2) = pedit(&output, args)?;
+        assert!(!status2.has_changed());
+        assert_eq!(output, output2);
+
+        Ok((output, status))
+    }
+
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn test_xml_edit() -> FinalResult {
+        let (output, status) = stable_pedit(XML_TEST, &[
+              "line",
+              r#"        <taskbar:DesktopApp DesktopApplicationLinkPath="C:\ProgramData\foo.exe" />"#,
+              "present",
+              "relative-to",
+              "</taskbar:TaskbarPinList>",
+              "before"
+        ])?;
+
+        assert!(status.has_changed());
+
+        assert_eq!(&output,
+r#"<LayoutModificationTemplate
+    xmlns="http://schemas.microsoft.com/Start/2014/LayoutModification"
+    xmlns:defaultlayout="http://schemas.microsoft.com/Start/2014/FullDefaultLayout"
+    xmlns:start="http://schemas.microsoft.com/Start/2014/StartLayout"
+    xmlns:taskbar="http://schemas.microsoft.com/Start/2014/TaskbarLayout"
+    Version="1">
+  <CustomTaskbarLayoutCollection PinListPlacement="Replace">
+    <defaultlayout:TaskbarLayout>
+      <taskbar:TaskbarPinList>
+        <taskbar:DesktopApp DesktopApplicationLinkPath="C:\Users\Administrator\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Scoop Apps\Process Explorer.lnk" />
+        <taskbar:DesktopApp DesktopApplicationLinkPath="C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Administrative Tools\IIS Manager.lnk" />
+        <taskbar:DesktopApp DesktopApplicationLinkPath="C:\ProgramData\foo.exe" />
+      </taskbar:TaskbarPinList>
+    </defaultlayout:TaskbarLayout>
+  </CustomTaskbarLayoutCollection>
+</LayoutModificationTemplate>
+"#);
+
+        Ok(())
     }
 }
