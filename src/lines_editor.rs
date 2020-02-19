@@ -14,7 +14,7 @@ pub struct LinesEditor {
 #[derive(Debug)]
 pub enum LinesEditorError {
     InvalidPairOrSeparator,
-    MultipleMatch,
+    MultipleCandidates,
     NotApplicable(String),
 }
 
@@ -22,7 +22,7 @@ impl fmt::Display for LinesEditorError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LinesEditorError::InvalidPairOrSeparator => write!(f, "Failed to split given value as key and value pair with given separator pattern"),
-            LinesEditorError::MultipleMatch => write!(f, "Multiple matches found"),
+            LinesEditorError::MultipleCandidates => write!(f, "Multiple candidates found"),
             LinesEditorError::NotApplicable(_) => write!(f, "Edit was not applicable"),
         }
     }
@@ -41,7 +41,7 @@ impl LinesEditor {
         let mut iter = self.lines.iter_mut();
         if let Some(line) = (&mut iter).find(|line| key_pattern.is_match(line)) {
             if iter.any(|line| key_pattern.is_match(line)) {
-                return Err(LinesEditorError::MultipleMatch)
+                return Err(LinesEditorError::MultipleCandidates)
             }
 
             if pair_pattern.is_match(line) {
@@ -72,7 +72,7 @@ impl LinesEditor {
                 let mut iter = self.lines.iter();
                 if let Some(position) = (&mut iter).position(|line| anchor.is_match(line)) {
                     if iter.any(|line| anchor.is_match(line)) {
-                        return Err(LinesEditorError::MultipleMatch)
+                        return Err(LinesEditorError::MultipleCandidates)
                     }
 
                     match relation {
@@ -92,7 +92,7 @@ impl LinesEditor {
         let mut iter = self.lines.iter();
         if let Some(position) = (&mut iter).position(|line| pattern.is_match(line)) {
             if iter.any(|line| pattern.is_match(line)) {
-                return Err(LinesEditorError::MultipleMatch)
+                return Err(LinesEditorError::MultipleCandidates)
             }
 
             self.lines.remove(position);

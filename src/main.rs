@@ -85,7 +85,6 @@ fn edit(input: impl Read, edit: Edit) -> PResult<(Box<dyn Display>, EditStatus)>
 // * top/end -> begginging/end or head/tail?
 // * option to create a file if it does not exists (for present edits)
 // * preserve no line eding on last line
-// * MultipleMatch -> MultipleCandidates
 fn main() -> FinalResult {
     let args = Cli::from_args();
     init_logger(&args.logging, vec![module_path!()]);
@@ -277,7 +276,7 @@ Host *.foo.example.com
     }
 
     #[test]
-    fn test_ssh_edit_key_multiple_match() {
+    fn test_ssh_edit_key_multi_candind() {
         let err = stable_pedit(SSH_TEST, &[
               "line-pair",
               "-s", " ",
@@ -285,7 +284,7 @@ Host *.foo.example.com
               "present",
               "at-top",
         ]).unwrap_err();
-        assert_eq!(&err.to_string(), "Multiple matches found");
+        assert_eq!(&err.to_string(), "Multiple candidates found");
     }
 
     #[test]
@@ -320,7 +319,7 @@ Host *.foo.example.com
     }
 
     #[test]
-    fn test_edit_pair_multi_match() {
+    fn test_edit_pair_multiple_candidates() {
         let err = stable_pedit("foo = 1\nbar = 2\nbar = 3\nbaz = 3", &[
               "line-pair",
               "bar = 4",
@@ -328,7 +327,7 @@ Host *.foo.example.com
               "at-top",
         ]).unwrap_err();
 
-        assert_eq!(&err.to_string(), "Multiple matches found");
+        assert_eq!(&err.to_string(), "Multiple candidates found");
     }
 
     #[test]
@@ -451,7 +450,7 @@ Host *.foo.example.com
     }
 
     #[test]
-    fn test_edit_line_relative_to_multi_match() {
+    fn test_edit_line_relative_to_multiple_candidates() {
         let err = stable_pedit("foo\nfoo", &[
               "line",
               r#"bar"#,
@@ -461,7 +460,7 @@ Host *.foo.example.com
               "before",
         ]).unwrap_err();
 
-        assert_eq!(&err.to_string(), "Multiple matches found");
+        assert_eq!(&err.to_string(), "Multiple candidates found");
     }
 
     #[test]
@@ -507,14 +506,14 @@ Host *.foo.example.com
     }
 
     #[test]
-    fn test_edit_line_absent_multi_match() {
+    fn test_edit_line_absent_multiple_candidates() {
         let err = stable_pedit("foo\nbaz\nbaz", &[
               "line",
               "baz",
               "absent",
         ]).unwrap_err();
 
-        assert_eq!(&err.to_string(), "Multiple matches found");
+        assert_eq!(&err.to_string(), "Multiple candidates found");
     }
 
     #[test]
@@ -532,13 +531,13 @@ Host *.foo.example.com
     }
 
     #[test]
-    fn test_edit_line_pair_absent_multi_match() {
+    fn test_edit_line_pair_absent_multiple_candidates() {
         let err = stable_pedit("foo = 1\nbaz = 2\nbaz = 2", &[
               "line-pair",
               "baz = 2",
               "absent",
         ]).unwrap_err();
 
-        assert_eq!(&err.to_string(), "Multiple matches found");
+        assert_eq!(&err.to_string(), "Multiple candidates found");
     }
 }
