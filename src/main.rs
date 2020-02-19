@@ -100,7 +100,6 @@ struct LinesEditor {
 #[derive(Debug)]
 enum ReplaceStatus {
     AlreadyPresent,
-    KeyNotFound(String),
     Replaced,
 }
 
@@ -108,7 +107,6 @@ enum ReplaceStatus {
 enum PresentStatus {
     AlreadyPresent,
     InsertedPlacement,
-    InsertedFallback,
 }
 
 #[derive(Debug)]
@@ -124,37 +122,32 @@ impl LinesEditor {
         })
     }
 
-    fn replaced(&mut self, pair_pattern: &Regex, key_pattern: &Regex, value: String) -> ReplaceStatus {
+    fn replaced(&mut self, pair_pattern: &Regex, key_pattern: &Regex, value: String) -> Result<ReplaceStatus, String> {
+        if self.lines.iter().any(|line| pair_pattern.is_match(line)) {
+            return Ok(ReplaceStatus::AlreadyPresent)
+        }
+
         let mut value = Some(value);
-        let mut replaced = false;
 
         self.lines = self.lines.drain(..).into_iter().fold(Vec::new(), |mut out, line| {
-            if key_pattern.is_match(&line) {
-                if let Some(value) = value.take() {
-                    if pair_pattern.is_match(&line) {
-                        out.push(line);
-                    } else {
-                        replaced = true;
-                        out.push(value);
-                    }
-                }
-                // else delete matching key
+            if key_pattern.is_match(&line) && value.is_some() {
+                out.push(value.take().unwrap());
             } else {
                 out.push(line);
             }
             out
         });
 
-        match (value, replaced) {
-            (Some(value), _) => ReplaceStatus::KeyNotFound(value),
-            (None, true) => ReplaceStatus::Replaced,
-            (None, false) => ReplaceStatus::AlreadyPresent,
+        if let Some(value) = value {
+            return Err(value)
         }
+
+        Ok(ReplaceStatus::Replaced)
     }
 
-    fn present(&mut self, value_pattern: &Regex, value: String, placement: &Placement) -> PresentStatus {
+    fn present(&mut self, value_pattern: &Regex, value: String, placement: &Placement) -> Result<PresentStatus, String> {
         if self.lines.iter().any(|line| value_pattern.is_match(line)) {
-            return PresentStatus::AlreadyPresent
+            return Ok(PresentStatus::AlreadyPresent)
         }
 
         let mut value = Some(value);
@@ -190,11 +183,10 @@ impl LinesEditor {
         }
 
         if let Some(value) = value {
-            self.lines.push(value);
-            return PresentStatus::InsertedFallback
+            return Err(value)
         }
 
-        PresentStatus::InsertedPlacement
+        Ok(PresentStatus::InsertedPlacement)
     }
 
     fn absent(&mut self, pattern: &Regex) -> AbsentStatus {
@@ -255,7 +247,6 @@ impl EditStatus {
     fn has_changed(&self) -> bool {
         match self {
             EditStatus::Replaced(ReplaceStatus::AlreadyPresent)  |
-            EditStatus::Replaced(ReplaceStatus::KeyNotFound(_))  |
             EditStatus::Present(PresentStatus::AlreadyPresent) |
             EditStatus::Absent(AbsentStatus::AlreadyAbsent) => false,
             _ => true,
@@ -291,7 +282,7 @@ fn edit(edit: Edit, input: impl Read) -> PResult<(Box<dyn Display>, EditStatus)>
             let status = match ensure {
                 Ensure::Present { placement } => {
                     info!("Ensuring line {:?} is preset", value);
-                    editor.present(&value_pattern, value, &placement).into()
+                    editor.present(&value_pattern, value, &placement).map_err(|_| "Failed to find placement for the value")?.into()
                 }
                 Ensure::Absent => {
                     info!("Ensuring line {:?} is absent", value);
@@ -326,11 +317,8 @@ fn edit(edit: Edit, input: impl Read) -> PResult<(Box<dyn Display>, EditStatus)>
                 Ensure::Present { placement } => {
                     info!("Ensuring key and value pair {:?} is preset", pair);
                     match editor.replaced(&pair_pattern, &replace_pattern, pair) {
-                        ReplaceStatus::KeyNotFound(pair) => {
-                            editor.present(&pair_pattern, pair, &placement).into()
-                        }
-                        status @ ReplaceStatus::AlreadyPresent |
-                        status @ ReplaceStatus::Replaced => status.into()
+                        Err(pair) => editor.present(&pair_pattern, pair, &placement).map_err(|_| "Key not found and failed to find placement for the pair")?.into(),
+                        Ok(status) => status.into()
                     }
                 }
                 Ensure::Absent => {
@@ -349,6 +337,7 @@ fn edit(edit: Edit, input: impl Read) -> PResult<(Box<dyn Display>, EditStatus)>
 // * tests
 // * stream input to output with no buffering when possible
 // * replaced -> substituted?
+// * option to create a file if it does not exists (for present edits)
 fn main() -> FinalResult {
     let args = Cli::from_args();
     init_logger(&args.logging, vec![module_path!()]);
