@@ -3,6 +3,7 @@ use cotton::prelude::result::Result as PResult;
 
 use regex::Regex;
 use diff::Result::*;
+use std::error::Error;
 
 const NEW_LINE: &str = "\n";
 
@@ -115,6 +116,73 @@ enum AbsentStatus {
     Removed,
 }
 
+#[derive(Debug)]
+enum EditStatus {
+    Replaced(ReplaceStatus),
+    Present(PresentStatus),
+    Absent(AbsentStatus),
+}
+
+impl From<ReplaceStatus> for EditStatus {
+    fn from(s: ReplaceStatus) -> EditStatus {
+        EditStatus::Replaced(s)
+    }
+}
+
+impl From<PresentStatus> for EditStatus {
+    fn from(s: PresentStatus) -> EditStatus {
+        EditStatus::Present(s)
+    }
+}
+
+impl From<AbsentStatus> for EditStatus {
+    fn from(s: AbsentStatus) -> EditStatus {
+        EditStatus::Absent(s)
+    }
+}
+
+impl EditStatus {
+    fn has_changed(&self) -> bool {
+        match self {
+            EditStatus::Replaced(ReplaceStatus::AlreadyPresent)  |
+            EditStatus::Present(PresentStatus::AlreadyPresent) |
+            EditStatus::Absent(AbsentStatus::AlreadyAbsent) => false,
+            _ => true,
+        }
+    }
+}
+
+impl fmt::Display for EditStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.has_changed() {
+            write!(f, "no change made")
+        } else {
+            match self {
+                EditStatus::Replaced(_) => write!(f, "value was replaced"),
+                EditStatus::Present(_) => write!(f, "value was inserted"),
+                EditStatus::Absent(_) => write!(f, "value was removed"),
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+enum LineEditorError {
+    PlacementError(&'static str),
+    InvalidPairOrSeparator,
+}
+
+impl fmt::Display for LineEditorError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LineEditorError::PlacementError(context) => write!(f, "No placement found while {}", context),
+            LineEditorError::InvalidPairOrSeparator => write!(f, "Failed to split given value as key and value pair with given separator pattern"),
+        }
+    }
+}
+
+impl Error for LineEditorError {}
+
 impl LinesEditor {
     fn load<R: Read>(data: R) -> PResult<LinesEditor> {
         Ok(LinesEditor {
@@ -206,6 +274,70 @@ impl LinesEditor {
             AbsentStatus::AlreadyAbsent
         }
     }
+
+    fn edit_line(&mut self, value: String, ignore_whitespace: bool, ensure: Ensure) -> Result<EditStatus, LineEditorError> {
+        let value_pattern = Regex::new(&if ignore_whitespace {
+            format!(r#"^\s*{}\s*$"#, &regex::escape(&value))
+        } else {
+            format!(r#"^{}$"#, &regex::escape(&value))
+        }).expect("failed to construct absent regex");
+
+        let status = match ensure {
+            Ensure::Present { placement } => {
+                info!("Ensuring line {:?} is preset", value);
+                self.present(&value_pattern, value, &placement)
+                    .map_err(|_| LineEditorError::PlacementError("ensuring line is present"))?
+                    .into()
+            }
+            Ensure::Absent => {
+                info!("Ensuring line {:?} is absent", value);
+                self.absent(&value_pattern).into()
+            }
+        };
+
+        debug!("Edit line:\n{:?}:\n{:#?}", status, self);
+        Ok(status)
+    }
+
+    fn edit_pair(&mut self, pair: String, multikey: bool, ignore_whitespace: bool, separator: &Regex, ensure: Ensure) -> Result<EditStatus, LineEditorError> {
+        let (key, value) = separator.splitn(&pair, 2).collect_tuple().ok_or(LineEditorError::InvalidPairOrSeparator)?;
+
+        let pair_pattern = Regex::new(&if ignore_whitespace {
+            format!(r#"^\s*{}{}{}\s*$"#, regex::escape(key), separator, regex::escape(value))
+        } else {
+            format!(r#"^{}{}{}$"#, regex::escape(key), separator, regex::escape(value))
+        }).expect("failed to construct pair_pattern regex");
+
+        let replace_pattern = if multikey {
+            // Replace only for full key-value match
+            pair_pattern.clone()
+        } else {
+            Regex::new(&if ignore_whitespace {
+                format!(r#"^\s*{}{}"#, regex::escape(key), separator)
+            } else {
+                format!(r#"^{}{}"#, regex::escape(key), separator)
+            }).expect("failed to construct replace_pattern regex")
+        };
+
+        let status = match ensure {
+            Ensure::Present { placement } => {
+                info!("Ensuring key and value pair {:?} is preset", pair);
+                match self.replaced(&pair_pattern, &replace_pattern, pair) {
+                    Err(pair) => self.present(&pair_pattern, pair, &placement)
+                        .map_err(|_| LineEditorError::PlacementError("ensuring key and value is present"))?
+                        .into(),
+                    Ok(status) => status.into()
+                }
+            }
+            Ensure::Absent => {
+                info!("Ensuring key and value pair {:?} is absent", pair);
+                self.absent(&pair_pattern).into()
+            }
+        };
+
+        debug!("Edit pair:\n{:?}:\n{:#?}", status, self);
+        Ok(status)
+    }
 }
 
 impl fmt::Display for LinesEditor {
@@ -218,119 +350,19 @@ impl fmt::Display for LinesEditor {
     }
 }
 
-#[derive(Debug)]
-enum EditStatus {
-    Replaced(ReplaceStatus),
-    Present(PresentStatus),
-    Absent(AbsentStatus),
-}
-
-impl From<ReplaceStatus> for EditStatus {
-    fn from(s: ReplaceStatus) -> EditStatus {
-        EditStatus::Replaced(s)
-    }
-}
-
-impl From<PresentStatus> for EditStatus {
-    fn from(s: PresentStatus) -> EditStatus {
-        EditStatus::Present(s)
-    }
-}
-
-impl From<AbsentStatus> for EditStatus {
-    fn from(s: AbsentStatus) -> EditStatus {
-        EditStatus::Absent(s)
-    }
-}
-
-impl EditStatus {
-    fn has_changed(&self) -> bool {
-        match self {
-            EditStatus::Replaced(ReplaceStatus::AlreadyPresent)  |
-            EditStatus::Present(PresentStatus::AlreadyPresent) |
-            EditStatus::Absent(AbsentStatus::AlreadyAbsent) => false,
-            _ => true,
-        }
-    }
-}
-
-impl fmt::Display for EditStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if !self.has_changed() {
-            write!(f, "no change made")
-        } else {
-            match self {
-                EditStatus::Replaced(_) => write!(f, "value was replaced"),
-                EditStatus::Present(_) => write!(f, "value was inserted"),
-                EditStatus::Absent(_) => write!(f, "value was removed"),
-            }
-        }
-    }
-}
-
 fn edit(edit: Edit, input: impl Read) -> PResult<(Box<dyn Display>, EditStatus)> {
     let mut editor = LinesEditor::load(input).problem_while("reading input text file")?;
 
-    Ok(match edit {
+    let status = match edit {
         Edit::Line { value, ignore_whitespace, ensure } => {
-            let value_pattern = Regex::new(&if ignore_whitespace {
-                format!(r#"^\s*{}\s*$"#, &regex::escape(&value))
-            } else {
-                format!(r#"^{}$"#, &regex::escape(&value))
-            }).expect("failed to construct absent regex");
-
-            let status = match ensure {
-                Ensure::Present { placement } => {
-                    info!("Ensuring line {:?} is preset", value);
-                    editor.present(&value_pattern, value, &placement).map_err(|_| "Failed to find placement for the value")?.into()
-                }
-                Ensure::Absent => {
-                    info!("Ensuring line {:?} is absent", value);
-                    editor.absent(&value_pattern).into()
-                }
-            };
-
-            debug!("{:?}:\n{:#?}", status, editor);
-            (Box::new(editor) as Box<dyn Display>, status)
+            editor.edit_line(value, ignore_whitespace, ensure)?
         }
         Edit::LinePair { pair, multikey, ignore_whitespace, separator, ensure } => {
-            let (key, value) = separator.splitn(&pair, 2).collect_tuple().ok_or_problem("Failed to split given value as key and value pair with given separator pattern")?;
-
-            let pair_pattern = Regex::new(&if ignore_whitespace {
-                format!(r#"^\s*{}{}{}\s*$"#, regex::escape(key), separator, regex::escape(value))
-            } else {
-                format!(r#"^{}{}{}$"#, regex::escape(key), separator, regex::escape(value))
-            }).expect("failed to construct pair_pattern regex");
-
-            let replace_pattern = if multikey {
-                // Replace only for full key-value match
-                pair_pattern.clone()
-            } else {
-                Regex::new(&if ignore_whitespace {
-                    format!(r#"^\s*{}{}"#, regex::escape(key), separator)
-                } else {
-                    format!(r#"^{}{}"#, regex::escape(key), separator)
-                }).expect("failed to construct replace_pattern regex")
-            };
-
-            let status = match ensure {
-                Ensure::Present { placement } => {
-                    info!("Ensuring key and value pair {:?} is preset", pair);
-                    match editor.replaced(&pair_pattern, &replace_pattern, pair) {
-                        Err(pair) => editor.present(&pair_pattern, pair, &placement).map_err(|_| "Key not found and failed to find placement for the pair")?.into(),
-                        Ok(status) => status.into()
-                    }
-                }
-                Ensure::Absent => {
-                    info!("Ensuring key and value pair {:?} is absent", pair);
-                    editor.absent(&pair_pattern).into()
-                }
-            };
-
-            debug!("{:?}:\n{:#?}", status, editor);
-            (Box::new(editor) as Box<dyn Display>, status)
+            editor.edit_pair(pair, multikey, ignore_whitespace, &separator, ensure)?
         }
-    })
+    };
+
+    Ok((Box::new(editor) as Box<dyn Display>, status))
 }
 
 //TODO:
