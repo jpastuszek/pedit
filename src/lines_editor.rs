@@ -13,15 +13,17 @@ pub struct LinesEditor {
 
 #[derive(Debug)]
 pub enum LinesEditorError {
-    PlacementError(&'static str),
     InvalidPairOrSeparator,
+    MultipleMatch,
+    NotApplicable(String),
 }
 
 impl fmt::Display for LinesEditorError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LinesEditorError::PlacementError(context) => write!(f, "No placement found while {}", context),
             LinesEditorError::InvalidPairOrSeparator => write!(f, "Failed to split given value as key and value pair with given separator pattern"),
+            LinesEditorError::MultipleMatch => write!(f, "Multiple matches found"),
+            LinesEditorError::NotApplicable(_) => write!(f, "Edit was not applicable"),
         }
     }
 }
@@ -35,16 +37,21 @@ impl LinesEditor {
         })
     }
 
-    fn replaced(&mut self, pair_pattern: &Regex, key_pattern: &Regex, value: String) -> Result<ReplaceStatus, String> {
+    fn replaced(&mut self, pair_pattern: &Regex, key_pattern: &Regex, value: String) -> Result<ReplaceStatus, LinesEditorError> {
         if self.lines.iter().any(|line| pair_pattern.is_match(line)) {
             return Ok(ReplaceStatus::AlreadyPresent)
         }
 
         let mut value = Some(value);
+        let mut multimach = false;
 
         self.lines = self.lines.drain(..).into_iter().fold(Vec::new(), |mut out, line| {
-            if key_pattern.is_match(&line) && value.is_some() {
-                out.push(value.take().unwrap());
+            if key_pattern.is_match(&line) {
+                if let Some(value) = value.take() {
+                    out.push(value);
+                } else {
+                    multimach = true
+                }
             } else {
                 out.push(line);
             }
@@ -52,13 +59,17 @@ impl LinesEditor {
         });
 
         if let Some(value) = value {
-            return Err(value)
+            return Err(LinesEditorError::NotApplicable(value))
+        }
+
+        if multimach {
+            return Err(LinesEditorError::MultipleMatch)
         }
 
         Ok(ReplaceStatus::Replaced)
     }
 
-    fn present(&mut self, value_pattern: &Regex, value: String, placement: &Placement) -> Result<PresentStatus, String> {
+    fn present(&mut self, value_pattern: &Regex, value: String, placement: &Placement) -> Result<PresentStatus, LinesEditorError> {
         if self.lines.iter().any(|line| value_pattern.is_match(line)) {
             return Ok(PresentStatus::AlreadyPresent)
         }
@@ -96,7 +107,7 @@ impl LinesEditor {
         }
 
         if let Some(value) = value {
-            return Err(value)
+            return Err(LinesEditorError::NotApplicable(value))
         }
 
         Ok(PresentStatus::InsertedPlacement)
@@ -130,9 +141,7 @@ impl LinesEditor {
         let status = match ensure {
             Ensure::Present { placement } => {
                 info!("Ensuring line {:?} is preset", value);
-                self.present(&value_pattern, value, &placement)
-                    .map_err(|_| LinesEditorError::PlacementError("ensuring line is present"))?
-                    .into()
+                self.present(&value_pattern, value, &placement)?.into()
             }
             Ensure::Absent => {
                 info!("Ensuring line {:?} is absent", value);
@@ -168,9 +177,8 @@ impl LinesEditor {
             Ensure::Present { placement } => {
                 info!("Ensuring key and value pair {:?} is preset", pair);
                 match self.replaced(&pair_pattern, &replace_pattern, pair) {
-                    Err(pair) => self.present(&pair_pattern, pair, &placement)
-                        .map_err(|_| LinesEditorError::PlacementError("ensuring key and value is present"))?
-                        .into(),
+                    Err(LinesEditorError::NotApplicable(pair)) => self.present(&pair_pattern, pair, &placement)?.into(),
+                    Err(err) => return Err(err),
                     Ok(status) => status.into()
                 }
             }

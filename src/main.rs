@@ -81,6 +81,8 @@ fn edit(input: impl Read, edit: Edit) -> PResult<(Box<dyn Display>, EditStatus)>
 // * tests
 // * stream input to output with no buffering when possible
 // * replaced -> substituted?
+// * line-pair -> line-kv?
+// * top/end -> begginging/end or head/tail?
 // * option to create a file if it does not exists (for present edits)
 fn main() -> FinalResult {
     let args = Cli::from_args();
@@ -157,6 +159,17 @@ r#"<LayoutModificationTemplate
   </CustomTaskbarLayoutCollection>
 </LayoutModificationTemplate>"#;
 
+    const SSH_TEST: &str =
+r#"UserKnownHostsFile /dev/null
+StrictHostKeyChecking no
+IdentityFile ~/.ssh/foo
+IdentityFile ~/.ssh/bar
+
+Host *.foo.example.com
+    User Administrator
+"#;
+
+    /// Applies edit to input
     fn pedit(input: &str, args: &[&str]) -> PResult<(String, EditStatus)> {
         let cli = Cli::from_iter_safe(Some("pedit").iter().chain(args.iter())).or_failed_to("bad args");
         let args = dbg![cli.edit];
@@ -167,6 +180,7 @@ r#"<LayoutModificationTemplate
         Ok((out, status))
     }
 
+    /// Applies edit to input also verifying that subsequent application on result won't change anything
     fn stable_pedit(input: &str, args: &[&str]) -> PResult<(String, EditStatus)> {
         let (output, status) = pedit(input, args)?;
 
@@ -190,7 +204,6 @@ r#"<LayoutModificationTemplate
         ])?;
 
         assert!(status.has_changed());
-
         assert_eq!(&output,
 r#"<LayoutModificationTemplate
     xmlns="http://schemas.microsoft.com/Start/2014/LayoutModification"
@@ -211,5 +224,65 @@ r#"<LayoutModificationTemplate
 "#);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_ssh_edit_key_value() -> FinalResult {
+        let (output, status) = stable_pedit(SSH_TEST, &[
+              "line-pair",
+              "-s", " ",
+              r#"StrictHostKeyChecking yes"#,
+              "present",
+              "at-end",
+        ])?;
+
+        assert!(status.has_changed());
+        assert_eq!(&output,
+r#"UserKnownHostsFile /dev/null
+StrictHostKeyChecking yes
+IdentityFile ~/.ssh/foo
+IdentityFile ~/.ssh/bar
+
+Host *.foo.example.com
+    User Administrator
+"#);
+        Ok(())
+    }
+
+    #[test]
+    fn test_ssh_edit_multikey_value() -> FinalResult {
+        let (output, status) = stable_pedit(SSH_TEST, &[
+              "line-pair",
+              "-s", " ",
+              "-m",
+              r#"IdentityFile ~/.ssh/quix"#,
+              "present",
+              "at-top",
+        ])?;
+
+        assert!(status.has_changed());
+        assert_eq!(&output,
+r#"IdentityFile ~/.ssh/quix
+UserKnownHostsFile /dev/null
+StrictHostKeyChecking no
+IdentityFile ~/.ssh/foo
+IdentityFile ~/.ssh/bar
+
+Host *.foo.example.com
+    User Administrator
+"#);
+        Ok(())
+    }
+
+    #[test]
+    fn test_ssh_edit_key_multiple_match() {
+        let err = stable_pedit(SSH_TEST, &[
+              "line-pair",
+              "-s", " ",
+              r#"IdentityFile ~/.ssh/quix"#,
+              "present",
+              "at-top",
+        ]).unwrap_err();
+        assert_eq!(&err.to_string(), "Multiple matches found");
     }
 }
