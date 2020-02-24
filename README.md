@@ -1,24 +1,29 @@
 [![Latest Version]][crates.io] [![Documentation]][docs.rs] ![License]
 
-`pedit` is command line utility that helps with editing configuration files.
+`pedit` is a command line utility that helps with automation of editing configuration files.
 
 Features:
-* Operations of this tool are idempotent which makes it suitable for use in administration script or systems like Puppet or Chef.
-* Ensure line in a text file is present or absent.
-* Ensure key-value pair in a text file is present or absent.
-* Key-value pairs can also be defined multiple times with different value (`--multikey`) or single key-value pair will be managed by default.
-* Relative placement of lines or key-value pairs in respect to existing lines in the text file.
-* By setting `--check` switch the tool will signal if change would have been required with exit status code.
-* By setting `--diff` switch the tool will show changes applied.
+*   Edits are idempotent which makes the tool suitable for use in administration script and systems like Puppet or Chef.
+*   Ensure line in a text file is present or absent.
+*   Ensure key-value pair in a text file is present or absent.
+*   Key-value pairs can also be defined multiple times with different values (`--multikey`).
+*   Support for relative placement of lines or key-value pairs in respect to existing lines in the text file.
+*   Regular expressions are used for matching values in the files.
+*   Check mode in which the tool will signal with exit status if change was required without performing any changes.
+*   Show changes applied or would be applied in diff style.
+*   Tested on MacOS as well as Windows.
 
 Example usage
 =====
 
-Ensure that `ssh_config` file contains `StrictHostKeyChecking` set to `yes` and if it is absent put it before line containing `User`.
+Ensure that `ssh_config` file contains key `StrictHostKeyChecking` set to value `yes`; if the key is absent put the pair before line containing `UserKnownHostsFile`.
 
-```sh
-pedit -i ~/.ssh/ssh_config --diff --check line-pair -s " " -m "StrictHostKeyChecking yes" present relative-to "User" before
-```
+	pedit --in-place ~/.ssh/ssh_config --diff line-pair --separator " " "StrictHostKeyChecking yes" present relative-to "UserKnownHostsFile" before
+
+Installation
+=====
+
+	cargo install pedit
 
 [crates.io]: https://crates.io/crates/pedit
 [Latest Version]: https://img.shields.io/crates/v/pedit.svg

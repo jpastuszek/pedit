@@ -7,7 +7,7 @@ repository = "https://git.sr.ht/~jpastuszek/pedit"
 documentation = "https://docs.rs/pedit"
 readme = "README.md"
 keywords = ["cli", "configuration", "editor"]
-categories = ["command-line-utilities", ""config]
+categories = ["command-line-utilities", "config"]
 license = "MIT"
 edition = "2018"
 
