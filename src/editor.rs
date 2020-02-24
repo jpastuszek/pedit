@@ -82,9 +82,9 @@ impl From<AbsentStatus> for EditStatus {
 impl EditStatus {
     pub fn has_changed(&self) -> bool {
         match self {
-            EditStatus::Replaced(ReplaceStatus::AlreadyPresent)  |
-            EditStatus::Present(PresentStatus::AlreadyPresent) |
-            EditStatus::Absent(AbsentStatus::AlreadyAbsent) => false,
+            EditStatus::Replaced(ReplaceStatus::AlreadyPresent)
+            | EditStatus::Present(PresentStatus::AlreadyPresent)
+            | EditStatus::Absent(AbsentStatus::AlreadyAbsent) => false,
             _ => true,
         }
     }

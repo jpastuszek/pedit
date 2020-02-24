@@ -1,14 +1,14 @@
-use cotton::prelude::*;
 use cotton::prelude::result::Result as PResult;
+use cotton::prelude::*;
 
-use regex::Regex;
 use diff::Result::*;
+use regex::Regex;
 use std::io::Cursor;
 
 mod editor;
 mod lines_editor;
 
-use editor::{Ensure, EditStatus};
+use editor::{EditStatus, Ensure};
 use lines_editor::LinesEditor;
 
 #[derive(Debug, StructOpt)]
@@ -71,12 +71,18 @@ fn edit(input: impl Read, edit: Edit) -> PResult<(Box<dyn Display>, EditStatus)>
     let mut editor = LinesEditor::load(input).problem_while("reading input text file")?;
 
     let status = match edit {
-        Edit::Line { value, ignore_whitespace, ensure } => {
-            editor.edit_line(value, ignore_whitespace, ensure)?
-        }
-        Edit::LinePair { pair, multikey, ignore_whitespace, separator, ensure } => {
-            editor.edit_pair(pair, multikey, ignore_whitespace, &separator, ensure)?
-        }
+        Edit::Line {
+            value,
+            ignore_whitespace,
+            ensure,
+        } => editor.edit_line(value, ignore_whitespace, ensure)?,
+        Edit::LinePair {
+            pair,
+            multikey,
+            ignore_whitespace,
+            separator,
+            ensure,
+        } => editor.edit_pair(pair, multikey, ignore_whitespace, &separator, ensure)?,
     };
 
     Ok((Box::new(editor) as Box<dyn Display>, status))
@@ -95,19 +101,27 @@ fn main() -> FinalResult {
 
     let mut diff_input = None;
 
-    let mut input = args.in_place
+    let mut input = args
+        .in_place
         .as_ref()
         .map(|file| {
-            match (File::open(file).map(|f| Box::new(f) as Box<dyn Read>), args.create) {
+            match (
+                File::open(file).map(|f| Box::new(f) as Box<dyn Read>),
+                args.create,
+            ) {
                 (Err(_), true) => Ok(Box::new(Cursor::new(String::new())) as Box<dyn Read>),
                 (result, _) => result,
             }
-        }).transpose().problem_while("opening file for reading")?
+        })
+        .transpose()
+        .problem_while("opening file for reading")?
         .unwrap_or_else(|| Box::new(stdin()) as Box<dyn Read>);
 
     if args.diff {
         let mut input_data = String::new();
-        input.read_to_string(&mut input_data).problem_while("reading input data")?;
+        input
+            .read_to_string(&mut input_data)
+            .problem_while("reading input data")?;
 
         diff_input = Some(input_data);
         input = Box::new(Cursor::new(diff_input.as_ref().unwrap()));
@@ -121,7 +135,7 @@ fn main() -> FinalResult {
         if status.has_changed() {
             let output_data = edited.to_string();
 
-            for diff in diff::lines(input_data, &output_data){
+            for diff in diff::lines(input_data, &output_data) {
                 match diff {
                     Left(line) => eprintln!("- {}", line),
                     Both(line, _) => eprintln!("  {}", line),
@@ -136,9 +150,12 @@ fn main() -> FinalResult {
             Err(Problem::from_error("File would have changed (check)")).fatal_with_status(2)?;
         }
     } else {
-        let mut output = args.in_place
+        let mut output = args
+            .in_place
             .as_ref()
-            .map(|file| File::create(file).map(|f| Box::new(f) as Box<dyn Write>)).transpose().problem_while("opening file for writing")?
+            .map(|file| File::create(file).map(|f| Box::new(f) as Box<dyn Write>))
+            .transpose()
+            .problem_while("opening file for writing")?
             .unwrap_or_else(|| Box::new(stdout()) as Box<dyn Write>);
 
         write!(output, "{}", edited)?;
@@ -168,8 +185,7 @@ r#"<LayoutModificationTemplate
   </CustomTaskbarLayoutCollection>
 </LayoutModificationTemplate>"#;
 
-    const SSH_TEST: &str =
-r#"UserKnownHostsFile /dev/null
+    const SSH_TEST: &str = r#"UserKnownHostsFile /dev/null
 StrictHostKeyChecking no
 IdentityFile ~/.ssh/foo
 IdentityFile ~/.ssh/bar
@@ -180,7 +196,8 @@ Host *.foo.example.com
 
     /// Applies edit to input
     fn pedit(input: &str, args: &[&str]) -> PResult<(String, EditStatus)> {
-        let cli = Cli::from_iter_safe(Some("pedit").iter().chain(args.iter())).or_failed_to("bad args");
+        let cli =
+            Cli::from_iter_safe(Some("pedit").iter().chain(args.iter())).or_failed_to("bad args");
         let args = dbg![cli.edit];
         let (disp, status) = edit(Cursor::new(input), args)?;
         let out = disp.to_string();
@@ -237,41 +254,52 @@ r#"<LayoutModificationTemplate
 
     #[test]
     fn test_ssh_edit_key_value() -> FinalResult {
-        let (output, status) = stable_pedit(SSH_TEST, &[
-              "line-pair",
-              "-s", " ",
-              r#"StrictHostKeyChecking yes"#,
-              "present",
-              "at-end",
-        ])?;
+        let (output, status) = stable_pedit(
+            SSH_TEST,
+            &[
+                "line-pair",
+                "-s",
+                " ",
+                r#"StrictHostKeyChecking yes"#,
+                "present",
+                "at-end",
+            ],
+        )?;
 
         assert!(status.has_changed());
-        assert_eq!(&output,
-r#"UserKnownHostsFile /dev/null
+        assert_eq!(
+            &output,
+            r#"UserKnownHostsFile /dev/null
 StrictHostKeyChecking yes
 IdentityFile ~/.ssh/foo
 IdentityFile ~/.ssh/bar
 
 Host *.foo.example.com
     User Administrator
-"#);
+"#
+        );
         Ok(())
     }
 
     #[test]
     fn test_ssh_edit_multikey_value() -> FinalResult {
-        let (output, status) = stable_pedit(SSH_TEST, &[
-              "line-pair",
-              "-s", " ",
-              "-m",
-              r#"IdentityFile ~/.ssh/quix"#,
-              "present",
-              "at-top",
-        ])?;
+        let (output, status) = stable_pedit(
+            SSH_TEST,
+            &[
+                "line-pair",
+                "-s",
+                " ",
+                "-m",
+                r#"IdentityFile ~/.ssh/quix"#,
+                "present",
+                "at-top",
+            ],
+        )?;
 
         assert!(status.has_changed());
-        assert_eq!(&output,
-r#"IdentityFile ~/.ssh/quix
+        assert_eq!(
+            &output,
+            r#"IdentityFile ~/.ssh/quix
 UserKnownHostsFile /dev/null
 StrictHostKeyChecking no
 IdentityFile ~/.ssh/foo
@@ -279,30 +307,34 @@ IdentityFile ~/.ssh/bar
 
 Host *.foo.example.com
     User Administrator
-"#);
+"#
+        );
         Ok(())
     }
 
     #[test]
     fn test_ssh_edit_key_multi_candind() {
-        let err = stable_pedit(SSH_TEST, &[
-              "line-pair",
-              "-s", " ",
-              r#"IdentityFile ~/.ssh/quix"#,
-              "present",
-              "at-top",
-        ]).unwrap_err();
+        let err = stable_pedit(
+            SSH_TEST,
+            &[
+                "line-pair",
+                "-s",
+                " ",
+                r#"IdentityFile ~/.ssh/quix"#,
+                "present",
+                "at-top",
+            ],
+        )
+        .unwrap_err();
         assert_eq!(&err.to_string(), "Multiple candidates found");
     }
 
     #[test]
     fn test_edit_pair_value() -> FinalResult {
-        let (output, status) = stable_pedit("foo = 1\nbar = 2\nbaz = 3", &[
-              "line-pair",
-              "bar = 4",
-              "present",
-              "at-top",
-        ])?;
+        let (output, status) = stable_pedit(
+            "foo = 1\nbar = 2\nbaz = 3",
+            &["line-pair", "bar = 4", "present", "at-top"],
+        )?;
 
         assert!(status.has_changed());
         assert_eq!(&output, "foo = 1\nbar = 4\nbaz = 3\n");
@@ -312,13 +344,10 @@ Host *.foo.example.com
 
     #[test]
     fn test_edit_pair_multikey_value() -> FinalResult {
-        let (output, status) = stable_pedit("foo = 1\nbar = 2\nbaz = 3", &[
-              "line-pair",
-              "-m",
-              "bar = 4",
-              "present",
-              "at-top",
-        ])?;
+        let (output, status) = stable_pedit(
+            "foo = 1\nbar = 2\nbaz = 3",
+            &["line-pair", "-m", "bar = 4", "present", "at-top"],
+        )?;
 
         assert!(status.has_changed());
         assert_eq!(&output, "bar = 4\nfoo = 1\nbar = 2\nbaz = 3\n");
@@ -328,26 +357,28 @@ Host *.foo.example.com
 
     #[test]
     fn test_edit_pair_multiple_candidates() {
-        let err = stable_pedit("foo = 1\nbar = 2\nbar = 3\nbaz = 3", &[
-              "line-pair",
-              "bar = 4",
-              "present",
-              "at-top",
-        ]).unwrap_err();
+        let err = stable_pedit(
+            "foo = 1\nbar = 2\nbar = 3\nbaz = 3",
+            &["line-pair", "bar = 4", "present", "at-top"],
+        )
+        .unwrap_err();
 
         assert_eq!(&err.to_string(), "Multiple candidates found");
     }
 
     #[test]
     fn test_edit_line_pair_relative_to_before_middle() -> FinalResult {
-        let (output, status) = stable_pedit("foo = 1\nbar = 2\nbaz = 3", &[
-              "line",
-              "quix = 4",
-              "present",
-              "relative-to",
-              "bar",
-              "before",
-        ])?;
+        let (output, status) = stable_pedit(
+            "foo = 1\nbar = 2\nbaz = 3",
+            &[
+                "line",
+                "quix = 4",
+                "present",
+                "relative-to",
+                "bar",
+                "before",
+            ],
+        )?;
 
         assert!(status.has_changed());
         assert_eq!(&output, "foo = 1\nquix = 4\nbar = 2\nbaz = 3\n");
@@ -357,14 +388,10 @@ Host *.foo.example.com
 
     #[test]
     fn test_edit_line_relative_to_before_top() -> FinalResult {
-        let (output, status) = stable_pedit("foo\nbar\nbaz", &[
-              "line",
-              "quix",
-              "present",
-              "relative-to",
-              "foo",
-              "before",
-        ])?;
+        let (output, status) = stable_pedit(
+            "foo\nbar\nbaz",
+            &["line", "quix", "present", "relative-to", "foo", "before"],
+        )?;
 
         assert!(status.has_changed());
         assert_eq!(&output, "quix\nfoo\nbar\nbaz\n");
@@ -374,14 +401,10 @@ Host *.foo.example.com
 
     #[test]
     fn test_edit_line_relative_to_before_middle() -> FinalResult {
-        let (output, status) = stable_pedit("foo\nbar\nbaz", &[
-              "line",
-              "quix",
-              "present",
-              "relative-to",
-              "bar",
-              "before",
-        ])?;
+        let (output, status) = stable_pedit(
+            "foo\nbar\nbaz",
+            &["line", "quix", "present", "relative-to", "bar", "before"],
+        )?;
 
         assert!(status.has_changed());
         assert_eq!(&output, "foo\nquix\nbar\nbaz\n");
@@ -391,14 +414,10 @@ Host *.foo.example.com
 
     #[test]
     fn test_edit_line_relative_to_before_end() -> FinalResult {
-        let (output, status) = stable_pedit("foo\nbar\nbaz", &[
-              "line",
-              "quix",
-              "present",
-              "relative-to",
-              "baz",
-              "before",
-        ])?;
+        let (output, status) = stable_pedit(
+            "foo\nbar\nbaz",
+            &["line", "quix", "present", "relative-to", "baz", "before"],
+        )?;
 
         assert!(status.has_changed());
         assert_eq!(&output, "foo\nbar\nquix\nbaz\n");
@@ -408,14 +427,10 @@ Host *.foo.example.com
 
     #[test]
     fn test_edit_line_relative_to_after_top() -> FinalResult {
-        let (output, status) = stable_pedit("foo\nbar\nbaz", &[
-              "line",
-              "quix",
-              "present",
-              "relative-to",
-              "foo",
-              "after",
-        ])?;
+        let (output, status) = stable_pedit(
+            "foo\nbar\nbaz",
+            &["line", "quix", "present", "relative-to", "foo", "after"],
+        )?;
 
         assert!(status.has_changed());
         assert_eq!(&output, "foo\nquix\nbar\nbaz\n");
@@ -425,14 +440,10 @@ Host *.foo.example.com
 
     #[test]
     fn test_edit_line_relative_to_after_middle() -> FinalResult {
-        let (output, status) = stable_pedit("foo\nbar\nbaz", &[
-              "line",
-              "quix",
-              "present",
-              "relative-to",
-              "bar",
-              "after",
-        ])?;
+        let (output, status) = stable_pedit(
+            "foo\nbar\nbaz",
+            &["line", "quix", "present", "relative-to", "bar", "after"],
+        )?;
 
         assert!(status.has_changed());
         assert_eq!(&output, "foo\nbar\nquix\nbaz\n");
@@ -442,14 +453,10 @@ Host *.foo.example.com
 
     #[test]
     fn test_edit_line_relative_to_after_end() -> FinalResult {
-        let (output, status) = stable_pedit("foo\nbar\nbaz", &[
-              "line",
-              "quix",
-              "present",
-              "relative-to",
-              "baz",
-              "after",
-        ])?;
+        let (output, status) = stable_pedit(
+            "foo\nbar\nbaz",
+            &["line", "quix", "present", "relative-to", "baz", "after"],
+        )?;
 
         assert!(status.has_changed());
         assert_eq!(&output, "foo\nbar\nbaz\nquix\n");
@@ -459,25 +466,18 @@ Host *.foo.example.com
 
     #[test]
     fn test_edit_line_relative_to_multiple_candidates() {
-        let err = stable_pedit("foo\nfoo", &[
-              "line",
-              r#"bar"#,
-              "present",
-              "relative-to",
-              "foo",
-              "before",
-        ]).unwrap_err();
+        let err = stable_pedit(
+            "foo\nfoo",
+            &["line", r#"bar"#, "present", "relative-to", "foo", "before"],
+        )
+        .unwrap_err();
 
         assert_eq!(&err.to_string(), "Multiple candidates found");
     }
 
     #[test]
     fn test_edit_line_absent_middle() -> FinalResult {
-        let (output, status) = stable_pedit("foo\nbar\nbaz", &[
-              "line",
-              "bar",
-              "absent",
-        ])?;
+        let (output, status) = stable_pedit("foo\nbar\nbaz", &["line", "bar", "absent"])?;
 
         assert!(status.has_changed());
         assert_eq!(&output, "foo\nbaz\n");
@@ -487,11 +487,7 @@ Host *.foo.example.com
 
     #[test]
     fn test_edit_line_absent_top() -> FinalResult {
-        let (output, status) = stable_pedit("foo\nbar\nbaz", &[
-              "line",
-              "foo",
-              "absent",
-        ])?;
+        let (output, status) = stable_pedit("foo\nbar\nbaz", &["line", "foo", "absent"])?;
 
         assert!(status.has_changed());
         assert_eq!(&output, "bar\nbaz\n");
@@ -501,11 +497,7 @@ Host *.foo.example.com
 
     #[test]
     fn test_edit_line_absent_end() -> FinalResult {
-        let (output, status) = stable_pedit("foo\nbar\nbaz", &[
-              "line",
-              "baz",
-              "absent",
-        ])?;
+        let (output, status) = stable_pedit("foo\nbar\nbaz", &["line", "baz", "absent"])?;
 
         assert!(status.has_changed());
         assert_eq!(&output, "foo\nbar\n");
@@ -515,22 +507,17 @@ Host *.foo.example.com
 
     #[test]
     fn test_edit_line_absent_multiple_candidates() {
-        let err = stable_pedit("foo\nbaz\nbaz", &[
-              "line",
-              "baz",
-              "absent",
-        ]).unwrap_err();
+        let err = stable_pedit("foo\nbaz\nbaz", &["line", "baz", "absent"]).unwrap_err();
 
         assert_eq!(&err.to_string(), "Multiple candidates found");
     }
 
     #[test]
     fn test_edit_line_pair_absent_middle() -> FinalResult {
-        let (output, status) = stable_pedit("foo = 1\nbar = 2\nbaz = 3", &[
-              "line-pair",
-              "bar = 2",
-              "absent",
-        ])?;
+        let (output, status) = stable_pedit(
+            "foo = 1\nbar = 2\nbaz = 3",
+            &["line-pair", "bar = 2", "absent"],
+        )?;
 
         assert!(status.has_changed());
         assert_eq!(&output, "foo = 1\nbaz = 3\n");
@@ -540,11 +527,11 @@ Host *.foo.example.com
 
     #[test]
     fn test_edit_line_pair_absent_multiple_candidates() {
-        let err = stable_pedit("foo = 1\nbaz = 2\nbaz = 2", &[
-              "line-pair",
-              "baz = 2",
-              "absent",
-        ]).unwrap_err();
+        let err = stable_pedit(
+            "foo = 1\nbaz = 2\nbaz = 2",
+            &["line-pair", "baz = 2", "absent"],
+        )
+        .unwrap_err();
 
         assert_eq!(&err.to_string(), "Multiple candidates found");
     }
