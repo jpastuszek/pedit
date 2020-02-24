@@ -2,6 +2,13 @@
 name = "pedit"
 version = "0.1.0"
 authors = ["Jakub Pastuszek <jpastuszek@protonmail.com>"]
+description = "Command line utility that helps with editing configuration files."
+repository = "https://git.sr.ht/~jpastuszek/pedit"
+documentation = "https://docs.rs/pedit"
+readme = "README.md"
+keywords = ["cli", "configuration", "editor"]
+categories = ["command-line-utilities", ""config]
+license = "MIT"
 edition = "2018"
 
 [dependencies]
