@@ -1,8 +1,13 @@
 [![Latest Version]][crates.io] [![Documentation]][docs.rs] ![License]
 
+pedit
+=====
+
 `pedit` is a command line utility that helps with automation of editing configuration files.
 
-Features:
+Features
+--------
+
 *   Edits are idempotent which makes the tool suitable for use in administration script and systems like Puppet or Chef.
 *   Ensure line in a text file is present or absent.
 *   Ensure key-value pair in a text file is present or absent.
@@ -14,14 +19,14 @@ Features:
 *   Tested on MacOS as well as Windows.
 
 Example usage
-=====
+-------------
 
 Ensure that `ssh_config` file contains key `StrictHostKeyChecking` set to value `yes`; if the key is absent put the pair before line containing `UserKnownHostsFile`.
 
 	pedit --in-place ~/.ssh/ssh_config --diff line-pair --separator " " "StrictHostKeyChecking yes" present relative-to "UserKnownHostsFile" before
 
 Installation
-=====
+------------
 
 	cargo install pedit
 
