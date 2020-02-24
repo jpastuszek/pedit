@@ -281,7 +281,7 @@ dependencies = [
 
 [[package]]
 name = "pedit"
-version = "1.0.0"
+version = "1.0.1-alpha.0"
 dependencies = [
  "cotton 0.0.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "diff 0.1.12 (registry+https://github.com/rust-lang/crates.io-index)",
