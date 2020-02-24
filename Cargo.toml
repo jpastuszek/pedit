@@ -1,6 +1,6 @@
 [package]
 name = "pedit"
-version = "0.1.0"
+version = "1.0.0"
 authors = ["Jakub Pastuszek <jpastuszek@protonmail.com>"]
 description = "Command line utility that helps with editing configuration files."
 repository = "https://git.sr.ht/~jpastuszek/pedit"
