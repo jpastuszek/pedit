@@ -91,10 +91,7 @@ fn edit(input: impl Read, edit: Edit) -> PResult<(Box<dyn Display>, EditStatus)>
 //TODO:
 // * tests
 // * stream input to output with no buffering when possible
-// * replaced -> substituted?
-// * line-pair -> line-kv?
-// * top/end -> begginging/end or head/tail?
-// * preserve no line eding on last line
+// * preserve no line ending on last line
 fn main() -> FinalResult {
     let args = Cli::from_args();
     init_logger(&args.logging, vec![module_path!()]);
